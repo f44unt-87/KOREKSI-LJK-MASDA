@@ -36,7 +36,7 @@ with tab1:
     with col_jsoal:
         jumlah_soal = st.number_input("Masukkan Jumlah Soal Ujian", min_value=1, max_value=50, value=5, step=1)
     with col_jbobot:
-        # Cukup isi di sini sekali, otomatis berlaku untuk semua nomor soal
+        # Mengatur bobot sama rata untuk semua nomor soal
         bobot_sama_rata = st.number_input("Ketentuan Nilai Tiap 1 Soal", min_value=1, max_value=100, value=2, step=1)
     
     st.subheader(f"🔑 Atur Kunci Jawaban ({jumlah_soal} Soal)")
@@ -47,17 +47,24 @@ with tab1:
     ans_map = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
     default_keys = ['A', 'C', 'D', 'B', 'E']
     
-    # Menampilkan grid kunci jawaban agar hemat ruang di iPhone (maksimal 5 pilihan per baris)
-    cols = st.columns(5)
-    for idx in range(jumlah_soal):
-        col_pos = idx % 5
-        with cols[col_pos]:
-            def_val = default_keys[idx % len(default_keys)]
-            pilihan = st.selectbox(f"Soal {idx+1}", ['A', 'B', 'C', 'D', 'E'], index=['A', 'B', 'C', 'D', 'E'].index(def_val), key=f"kunci_{idx}")
-            kunci_user_input[idx] = ans_map[pilihan]
-            
-            # Otomatis mengisi bobot soal berdasarkan input global di atas tanpa perlu diisi manual satu per satu
-            bobot_user_input[idx] = bobot_sama_rata
+    # --- PERBAIKAN LOGIKA URUTAN NOMOR ---
+    # Membuat container kosong untuk menampung baris-baris berurutan
+    # Setiap baris diisi maksimal 5 kolom agar pas dengan layar iPhone
+    for base_idx in range(0, jumlah_soal, 5):
+        cols = st.columns(5)
+        for sub_idx in range(5):
+            idx = base_idx + sub_idx
+            if idx < jumlah_soal:
+                with cols[sub_idx]:
+                    def_val = default_keys[idx % len(default_keys)]
+                    pilihan = st.selectbox(
+                        f"Soal {idx+1}", 
+                        ['A', 'B', 'C', 'D', 'E'], 
+                        index=['A', 'B', 'C', 'D', 'E'].index(def_val), 
+                        key=f"kunci_{idx}"
+                    )
+                    kunci_user_input[idx] = ans_map[pilihan]
+                    bobot_user_input[idx] = bobot_sama_rata
             
     # Hitung total skor maksimal otomatis
     total_bobot_maksimal = jumlah_soal * bobot_sama_rata
