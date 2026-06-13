@@ -1,6 +1,9 @@
 import cv2
 import numpy as np
-import gradio as gr
+import streamlit as st
+
+# Konfigurasi Tampilan Halaman Utama di iPhone
+st.set_page_config(page_title="KOREKSI CEPAT MASLAKUL HUDA", layout="centered")
 
 def urutkan_kontur(cnts, method="left-to-right"):
     if not cnts:
@@ -11,155 +14,119 @@ def urutkan_kontur(cnts, method="left-to-right"):
     cnts, _ = zip(*sorted(zip(cnts, boundingBoxes), key=lambda b: b[1][i], reverse=reverse))
     return cnts
 
-def proses_ljk_gradio(nama_siswa, kelas_siswa, nama_mapel, kelas_ujian, 
-                       kunci_1, kunci_2, kunci_3, kunci_4, kunci_5, 
-                       input_gambar):
-    # 1. Validasi Input Nama Siswa
+# --- JUDUL UTAMA ---
+st.title("🏛️ KOREKSI CEPAT MASLAKUL HUDA")
+st.write("Aplikasi pemindai LJK instan langsung lewat kamera iPhone Anda.")
+st.markdown("---")
+
+# --- FORM INPUT DATA ---
+st.subheader("👤 Data Siswa & Ujian")
+nama_siswa = st.text_input("Nama Siswa (Wajib)")
+kelas_siswa = st.text_input("Kelas Siswa (Opsional)")
+nama_mapel = st.text_input("Nama Mata Pelajaran (Opsional)")
+kelas_ujian = st.text_input("Kelas Ujian (Opsional)")
+
+# --- PENGATURAN KUNCI JAWABAN ---
+st.subheader("🔑 Pengaturan Kunci Jawaban")
+col1, col2, col3, col4, col5 = st.columns(5)
+with col1: kunci_1 = st.selectbox("Soal 1", ['A', 'B', 'C', 'D', 'E'], index=0)
+with col2: kunci_2 = st.selectbox("Soal 2", ['A', 'B', 'C', 'D', 'E'], index=2)
+with col3: kunci_3 = st.selectbox("Soal 3", ['A', 'B', 'C', 'D', 'E'], index=3)
+with col4: kunci_4 = st.selectbox("Soal 4", ['A', 'B', 'C', 'D', 'E'], index=0)
+with col5: kunci_5 = st.selectbox("Soal 5", ['A', 'B', 'C', 'D', 'E'], index=4)
+
+st.markdown("---")
+
+# --- AMBIL GAMBAR DARI KAMERA IPHONE ---
+st.subheader("📷 Ambil / Unggah Gambar LJK")
+# st.camera_input otomatis mengaktifkan kamera depan/belakang iPhone Anda dengan izin iOS
+input_gambar = st.camera_input("Posisikan LJK tepat di depan kamera")
+
+# Jika user belum mengambil foto, coba tawarkan opsi upload file alternatif
+if input_gambar is None:
+    input_gambar = st.file_uploader("Atau pilih file gambar dari galeri iPhone", type=["jpg", "jpeg", "png"])
+
+# --- TOMBOL PROSES KOREKSI ---
+if st.button("🚀 MULAI KOREKSI", type="primary"):
     if not nama_siswa.strip():
-        return None, "⚠️ ERROR: Nama Siswa wajib diisi sebelum melakukan koreksi!"
+        st.error("⚠️ Nama Siswa wajib diisi terlebih dahulu!")
+    elif input_gambar is None:
+        st.error("⚠️ Silakan ambil foto LJK atau unggah file terlebih dahulu!")
+    else:
+        with st.spinner("Sedang memproses dan mencocokkan bulatan LJK..."):
+            # Membaca gambar dari Streamlit input ke OpenCV format
+            file_bytes = np.asarray(bytearray(input_gambar.read()), dtype=np.uint8)
+            image = cv2.imdecode(file_bytes, 1)
+            output = image.copy()
 
-    # 2. Validasi Input Gambar
-    if input_gambar is None:
-        return None, "⚠️ ERROR: Silakan unggah file gambar atau ambil foto LJK terlebih dahulu!"
+            # Map Kunci Jawaban
+            ans_map = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
+            kunci_jawaban = {0: ans_map[kunci_1], 1: ans_map[kunci_2], 2: ans_map[kunci_3], 3: ans_map[kunci_4], 4: ans_map[kunci_5]}
 
-    # 3. Konfigurasi Kunci Jawaban dari Form
-    ans_map = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
-    kunci_jawaban = {
-        0: ans_map[kunci_1],
-        1: ans_map[kunci_2],
-        2: ans_map[kunci_3],
-        3: ans_map[kunci_4],
-        4: ans_map[kunci_5]
-    }
-    
-    total_soal = 5
-    total_pilihan = 5
-    tampilan_kelas = kelas_siswa.strip().upper() if kelas_siswa.strip() else "-"
-    tampilan_mapel = nama_mapel.strip().upper() if nama_mapel.strip() else "-"
-    tampilan_kelas_ujian = kelas_ujian.strip().upper() if kelas_ujian.strip() else "-"
+            # Pre-processing
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
 
-    # 4. Membaca Gambar (Gradio mengirimkan gambar dalam format RGB NumPy Array)
-    image = cv2.cvtColor(input_gambar, cv2.COLOR_RGB2BGR)
-    output = image.copy()
-    
-    # 5. Pre-processing Gambar
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+            # Cari Kontur
+            cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            kontur_lingkaran = []
 
-    # 6. Cari Kontur Lingkaran LJK
-    cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    kontur_lingkaran = []
+            for c in cnts:
+                (x, y, w, h) = cv2.boundingRect(c)
+                ar = w / float(h)
+                if w >= 20 and h >= 20 and 0.8 <= ar <= 1.2:
+                    kontur_lingkaran.append(c)
 
-    for c in cnts:
-        (x, y, w, h) = cv2.boundingRect(c)
-        ar = w / float(h)
-        if w >= 20 and h >= 20 and 0.8 <= ar <= 1.2:
-            kontur_lingkaran.append(c)
+            # Validasi jika jumlah bulatan kurang
+            if len(kontur_lingkaran) < (5 * 5):
+                st.error(f"❌ Gagal memproses! Hanya mendeteksi {len(kontur_lingkaran)} bulatan jawaban.")
+                st.warning("Tips: Pastikan kertas LJK mendapat cahaya terang merata dan posisinya lurus masuk ke frame kamera.")
+                st.image(image, channels="BGR", caption="Gambar Asli")
+            else:
+                kontur_lingkaran = urutkan_kontur(kontur_lingkaran, method="top-to-bottom")
+                benar = 0
 
-    # Jika bulatan tidak terdeteksi lengkap
-    if len(kontur_lingkaran) < (total_soal * total_pilihan):
-        pesan_error = (
-            f"❌ Gagal memproses! Hanya mendeteksi {len(kontur_lingkaran)} bulatan jawaban.\n\n"
-            f"Tips Penggunaan di iPhone:\n"
-            f"1. Pastikan posisi LJK tegak lurus (tidak miring).\n"
-            f"2. Cari ruangan dengan pencahayaan terang agar tidak ada bayangan HP.\n"
-            f"3. Pastikan seluruh batas kertas LJK masuk ke dalam frame kamera."
-        )
-        return input_gambar, pesan_error
+                for q, i in enumerate(range(0, len(kontur_lingkaran), 5)):
+                    cnts_pilihan = urutkan_kontur(kontur_lingkaran[i:i + 5], method="left-to-right")
+                    diarsir = None
 
-    # 7. Mengurutkan Soal (Atas ke Bawah)
-    kontur_lingkaran = urutkan_kontur(kontur_lingkaran, method="top-to-bottom")
-    benar = 0
+                    for j, c in enumerate(cnts_pilihan):
+                        mask = np.zeros(thresh.shape, dtype="uint8")
+                        cv2.drawContours(mask, [c], -1, 255, -1)
+                        mask = cv2.bitwise_and(thresh, mask)
+                        total = cv2.countNonZero(mask)
 
-    # 8. Analisis Jawaban Siswa
-    for q, i in enumerate(range(0, len(kontur_lingkaran), total_pilihan)):
-        cnts_pilihan = urutkan_kontur(kontur_lingkaran[i:i + total_pilihan], method="left-to-right")
-        diarsir = None
+                        if diarsir is None or total > diarsir[0]:
+                            diarsir = (total, j)
 
-        for j, c in enumerate(cnts_pilihan):
-            mask = np.zeros(thresh.shape, dtype="uint8")
-            cv2.drawContours(mask, [c], -1, 255, -1)
-            mask = cv2.bitwise_and(thresh, mask)
-            total = cv2.countNonZero(mask)
+                    kunci = kunci_jawaban[q]
+                    warna = (0, 255, 0) if kunci == diarsir[1] else (0, 0, 255)
+                    if kunci == diarsir[1]:
+                        benar += 1
 
-            if diarsir is None or total > diarsir[0]:
-                diarsir = (total, j)
+                    cv2.drawContours(output, [cnts_pilihan[kunci]], -1, warna, 3)
 
-        kunci = kunci_jawaban[q]
-        warna = (0, 255, 0) if kunci == diarsir[1] else (0, 0, 255)
-        
-        if kunci == diarsir[1]:
-            benar += 1
+                # Menampilkan Hasil Akhir
+                skor = (benar / 5) * 100
+                tampilan_kelas = kelas_siswa.strip().upper() if kelas_siswa.strip() else "-"
+                tampilan_mapel = nama_mapel.strip().upper() if nama_mapel.strip() else "-"
+                tampilan_kelas_ujian = kelas_ujian.strip().upper() if kelas_ujian.strip() else "-"
 
-        cv2.drawContours(output, [cnts_pilihan[kunci]], -1, warna, 3)
-
-    # 9. Kalkulasi Skor Akhir
-    skor = (benar / total_soal) * 100
-    
-    # 10. Format Output Text Ringkasan
-    hasil_teks = (
-        f"📝 **IDENTITAS UJIAN & SISWA**\n"
-        f"• Nama Siswa : {nama_siswa.upper()}\n"
-        f"• Kelas Siswa : {tampilan_kelas}\n"
-        f"• Mata Pelajaran : {tampilan_mapel}\n"
-        f"• Kelas Ujian : {tampilan_kelas_ujian}\n\n"
-        f"📊 **HASIL KOREKSI**\n"
-        f"• Jumlah Benar : {benar} / {total_soal} Soal\n"
-        f"• 💯 **NILAI AKHIR : {skor:.2f}**"
-    )
-    
-    # Kembalikan gambar dalam format RGB untuk Gradio
-    output_rgb = cv2.cvtColor(output, cv2.COLOR_BGR2RGB)
-    return output_rgb, hasil_teks
-
-# --- MEMBANGUN ANTARMUKA GRADIO WEB ---
-with gr.Blocks(title="KOREKSI CEPAT MASLAKUL HUDA", theme=gr.themes.Soft()) as demo:
-    
-    gr.Markdown(
-        """
-        # 🏛️ KOREKSI CEPAT MASLAKUL HUDA
-        Aplikasi pemindai dan korektor Lembar Jawab Komputer (LJK) instan berbasis web.
-        """
-    )
-    
-    with gr.Row():
-        # Kolom Kiri: Input Informasi & Kunci Jawaban
-        with gr.Column():
-            gr.Markdown("### 👤 Data Siswa & Ujian")
-            nama_siswa = gr.Textbox(label="Nama Siswa (Wajib)", placeholder="Masukkan nama siswa...")
-            kelas_siswa = gr.Textbox(label="Kelas Siswa (Opsional)", placeholder="Contoh: 10-A, 11-B...")
-            nama_mapel = gr.Textbox(label="Nama Mata Pelajaran", placeholder="Contoh: Matematika, Fiqih...")
-            kelas_ujian = gr.Textbox(label="Kelas Ujian", placeholder="Contoh: Kelas 9, Kelas 12...")
-            
-            gr.Markdown("### 🔑 Pengaturan Kunci Jawaban (5 Soal)")
-            with gr.Row():
-                kunci_1 = gr.Dropdown(['A', 'B', 'C', 'D', 'E'], value='A', label="Soal 1")
-                kunci_2 = gr.Dropdown(['A', 'B', 'C', 'D', 'E'], value='C', label="Soal 2")
-                kunci_3 = gr.Dropdown(['A', 'B', 'C', 'D', 'E'], value='D', label="Soal 3")
-                kunci_4 = gr.Dropdown(['A', 'B', 'C', 'D', 'E'], value='A', label="Soal 4")
-                kunci_5 = gr.Dropdown(['A', 'B', 'C', 'D', 'E'], value='E', label="Soal 5")
-
-        # Kolom Kanan: Kamera & Hasil Scanning
-        with gr.Column():
-            gr.Markdown("### 📷 Ambil / Unggah Gambar LJK")
-            # Komponen gambar Gradio otomatis menyediakan tombol kamera dan upload file di iPhone
-            input_gambar = gr.Image(label="Kamera / File Gambar LJK", sources=["webcam", "upload"], type="numpy")
-            
-            btn_proses = gr.Button("🚀 MULAI KOREKSI LEMBAR JAWABAN", variant="primary")
-            
-            gr.Markdown("### 📋 Hasil Penilaian")
-            output_text = gr.Markdown(value="Hasil nilai akan muncul di sini setelah menekan tombol koreksi.")
-            output_gambar = gr.Image(label="Visualisasi Hasil Koreksi Bulatan")
-
-    # Logika Trigger Tombol Klik
-    btn_proses.click(
-        fn=proses_ljk_gradio,
-        inputs=[nama_siswa, kelas_siswa, nama_mapel, kelas_ujian, 
-                kunci_1, kunci_2, kunci_3, kunci_4, kunci_5, input_gambar],
-        outputs=[output_gambar, output_text]
-    )
-
-# Menjalankan aplikasi secara lokal dan membuat tautan publik shareable
-if __name__ == "__main__":
-    demo.launch(share=True)
+                st.success("🎉 Koreksi Selesai!")
+                
+                # Kotak Hasil Nilai
+                st.markdown(f"""
+                ### 📋 LAPORAN HASIL PENILAIAN
+                * **Nama Siswa** : {nama_siswa.upper()}
+                * **Kelas Siswa** : {tampilan_kelas}
+                * **Mata Pelajaran** : {tampilan_mapel}
+                * **Kelas Ujian** : {tampilan_kelas_ujian}
+                
+                **🎯 SKOR UTAMA:**
+                * Jumlah Benar : **{benar} / 5 Soal**
+                * ## 💯 NILAI AKHIR: {skor:.2f}
+                """)
+                
+                # Tampilkan visualisasi gambar
+                st.image(output, channels="BGR", caption="Visualisasi Hasil Koreksi Lembar Jawaban")
