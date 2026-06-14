@@ -39,21 +39,23 @@ with tab1:
         bobot_sama_rata = st.number_input("Ketentuan Nilai Tiap 1 Soal", min_value=1, max_value=100, value=2, step=1)
     
     st.subheader(f"🔑 Atur Kunci Jawaban Resmi ({jumlah_soal} Soal)")
+    st.write("Sesuai permintaan, semua nomor default diatur ke **B** untuk mempermudah pengisian:")
     
     kunci_master = {}
-    default_keys = ['A', 'C', 'D', 'B', 'E']
+    ans_map = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
     
+    # Grid input kunci jawaban urut baris horizontal (1-5, 6-10, dst)
     for base_idx in range(0, jumlah_soal, 5):
         cols = st.columns(5)
         for sub_idx in range(5):
             idx = base_idx + sub_idx
             if idx < jumlah_soal:
                 with cols[sub_idx]:
-                    def_val = default_keys[idx % len(default_keys)]
+                    # MODIFIKASI: Default index dipaksa ke posisi 1 (artinya huruf 'B')
                     pilihan = st.selectbox(
                         f"Soal {idx+1}", 
                         ['A', 'B', 'C', 'D', 'E'], 
-                        index=['A', 'B', 'C', 'D', 'E'].index(def_val), 
+                        index=1, 
                         key=f"master_kunci_{idx}"
                     )
                     kunci_master[idx] = pilihan
@@ -71,7 +73,7 @@ with tab1:
     st.success("✅ Kunci Jawaban berhasil disimpan! Silakan pindah ke TAB 2 di atas.")
 
 # ==========================================
-# TAB 2: AUTOMATIC SCANNING & WA (ANTI-FAIL / CERDAS)
+# TAB 2: AUTOMATIC SCANNING & WA (PRESISI TINGGI)
 # ==========================================
 with tab2:
     total_soal_aktif = st.session_state.get('total_soal', 30)
@@ -91,30 +93,24 @@ with tab2:
         input_gambar = st.file_uploader("Atau pilih file gambar dari Galeri iPhone", type=["jpg", "jpeg", "png"])
 
     if input_gambar is not None:
-        with st.spinner("Mengoptimalkan gambar dan menghitung bulatan..."):
+        with St.spinner("Memproses gambar dengan kecerdasan adaptif..."):
             file_bytes = np.asarray(bytearray(input_gambar.read()), dtype=np.uint8)
             image = cv2.imdecode(file_bytes, 1)
             output = image.copy()
             
-            # --- 1. OPTIMALISASI PRE-PROCESSING UNTUK KAMERA HP ---
+            # Pre-processing Adaptif Ekstrem
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            # Menggunakan CLAHE (Contrast Limited Adaptive Histogram Equalization) untuk meratakan bayangan HP / lampu miring
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-            gray_equalized = clahe.apply(gray)
-            blurred = cv2.GaussianBlur(gray_equalized, (3, 3), 0)
-            
-            # Menggunakan adaptive thresholding agar bagian kertas yang agak gelap/terkena bayangan tetap terbaca putih
-            thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 51, 11)
+            blurred = cv2.medianBlur(gray, 3)
+            thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 7)
 
-            # --- 2. PELONGGARAN FILTER GEOMETRI (ANTI-MELINGKAR KAKU) ---
+            # Pelonggaran Filter Geometri Bulatan
             cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             kontur_lingkaran = []
             
             for c in cnts:
                 (x, y, w, h) = cv2.boundingRect(c)
                 ar = w / float(h)
-                # Melonggarkan batasan rasio aspek (0.7 sampai 1.35) agar bulatan yang terdistorsi akibat kamera miring tetap lolos filter
-                if 12 <= w <= 60 and 12 <= h <= 60 and 0.70 <= ar <= 1.35:
+                if 10 <= w <= 70 and 10 <= h <= 70 and 0.65 <= ar <= 1.45:
                     kontur_lingkaran.append(c)
 
             soal_benar = 0
@@ -123,26 +119,39 @@ with tab2:
             ans_letters = ['A', 'B', 'C', 'D', 'E']
             detail_jawaban = []
 
-            target_bulatan = total_soal_aktif * 5
+            batas_toleransi_minimal = int((total_soal_aktif * 5) * 0.75)
 
-            if len(kontur_lingkaran) >= target_bulatan:
-                # Susun koordinat secara urut horizontal dan vertikal
+            if len(kontur_lingkaran) >= batas_toleransi_minimal:
                 boundingBoxes = [cv2.boundingRect(c) for c in kontur_lingkaran]
                 kontur_lingkaran = [c for _, c in sorted(zip(boundingBoxes, kontur_lingkaran), key=lambda b: b[0][1])]
                 
                 list_soal_kontur = []
-                for i in range(0, len(kontur_lingkaran), 5):
-                    sub_grup = kontur_lingkaran[i:i+5]
-                    if len(sub_grup) == 5:
-                        sub_grup_boxes = [cv2.boundingRect(cg) for cg in sub_grup]
-                        sub_grup = [cg for _, cg in sorted(zip(sub_grup_boxes, sub_grup), key=lambda b: b[0][0])]
-                        list_soal_kontur.append(sub_grup)
+                while len(kontur_lingkaran) >= 5:
+                    anchor_y = cv2.boundingRect(kontur_lingkaran[0])[1]
+                    sebaris = []
+                    sisa = []
+                    for c in kontur_lingkaran:
+                        y_curr = cv2.boundingRect(c)[1]
+                        if abs(y_curr - anchor_y) < 25:
+                            sebaris.append(c)
+                        else:
+                            sisa.append(c)
+                    
+                    if len(sebaris) >= 5:
+                        sebaris_boxes = [cv2.boundingRect(cg) for cg in sebaris]
+                        sebaris = [cg for _, cg in sorted(zip(sebaris_boxes, sebaris), key=lambda b: b[0][0])]
+                        list_soal_kontur.append(sebaris[:5])
+                    
+                    kontur_lingkaran = sisa
+                    if len(sebaris) < 5:
+                        if kontur_lingkaran:
+                            kontur_lingkaran.pop(0)
+
+                def urutan_blok_maslakul(grup):
+                    box = cv2.boundingRect(grup[0])
+                    return (int(box[0] / 200), box[1])
                 
-                def dapatkan_posisi_blok(grup):
-                    (x, y, w, h) = cv2.boundingRect(grup[0])
-                    return (x, y)
-                
-                list_soal_kontur = sorted(list_soal_kontur, key=dapatkan_posisi_blok)
+                list_soal_kontur = sorted(list_soal_kontur, key=urutan_blok_maslakul)
 
                 for q in range(min(total_soal_aktif, len(list_soal_kontur))):
                     cnts_pilihan = list_soal_kontur[q]
@@ -158,7 +167,7 @@ with tab2:
                             diarsir = (total, j)
 
                     huruf_terdeteksi = ans_letters[diarsir[1]]
-                    huruf_kunci = kunci_master_aktif.get(q, 'A')
+                    huruf_kunci = kunci_master_aktif.get(q, 'B')
 
                     if huruf_terdeteksi == huruf_kunci:
                         soal_benar += 1
@@ -173,14 +182,12 @@ with tab2:
                     cv2.drawContours(output, [cnts_pilihan[ans_letters.index(huruf_kunci)]], -1, warna, 3)
 
                 nilai_akhir = (skor_didapat / max_skor_aktif) * 100
-                status_koreksi = "BERHASIL OTOMATIS (CANGGIH)"
+                status_koreksi = "BERHASIL OTOMATIS (MODE TOLERANSI TINGGI)"
             else:
-                # --- BACKUP MODE: JIKA MINIMAL BULATAN GAGAL KARENA TERPOTONG / TERLALU MIRING ---
-                # Menggunakan deteksi baris cerdas berbasis kedekatan y (Proximity) sebagai cadangan keselamatan data
                 soal_benar = 0
                 soal_salah = total_soal_aktif
                 nilai_akhir = 0.0
-                status_koreksi = f"MOHON DEKATKAN KAMERA / CARI CAHAYA TERANG (Terdeteksi {len(kontur_lingkaran)} bulatan)"
+                status_koreksi = f"FOTO TERLALU JAUH / TERPOTONG (Terdeteksi {len(kontur_lingkaran)} bulatan)"
 
             st.success("✨ Analisis Selesai!")
 
@@ -205,13 +212,19 @@ with tab2:
                 for line in detail_jawaban:
                     st.write(line)
 
-            st.image(output, channels="BGR", caption="Visualisasi Hasil Analisis Kamera")
+            st.image(output, channels="BGR", caption="Hasil Analisis Kamera")
 
             st.markdown("---")
             
             # --- INTEGRASI WHATSAPP WA ---
             st.subheader("📲 Kirim Hasil Nilai ke WhatsApp")
-            no_wa = st.text_input("Masukkan Nomor WA Penerima", placeholder="Contoh: 628123456789")
+            # MODIFIKASI: Form nomor langsung otomatis diisi default nomor Anda
+            no_wa_raw = st.text_input("Masukkan Nomor WA Penerima", value="081353539600")
+            
+            # Membersihkan input agar otomatis memakai kode 62 internasional untuk WhatsApp Link
+            no_wa_clean = no_wa_raw.strip()
+            if no_wa_clean.startswith("0"):
+                no_wa_clean = "62" + no_wa_clean[1:]
             
             pesan_wa = (
                 f"🚨 *LAPORAN HASIL UJIAN SISWA*\n"
@@ -230,9 +243,9 @@ with tab2:
             )
             
             pesan_encoded = urllib.parse.quote(pesan_wa)
-            link_wa = f"https://api.whatsapp.com/send?phone={no_wa.strip()}&text={pesan_encoded}"
+            link_wa = f"https://api.whatsapp.com/send?phone={no_wa_clean}&text={pesan_encoded}"
 
-            if no_wa:
+            if no_wa_clean:
                 st.markdown(f'''
                     <a href="{link_wa}" target="_blank">
                         <button style="
