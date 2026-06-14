@@ -14,8 +14,8 @@ def proses_satu_kolom_aman(kontur_kolom, thresh, ans_letters):
     # Ambil bounding box untuk pengurutan
     boxes = [cv2.boundingRect(c) for c in kontur_kolom]
     
-    # Urutkan dari atas ke bawah berdasarkan koordinat Y
-    kontur_kolom = [c for _, c in sorted(zip(boxes, kontur_kolom), key=lambda b: b[1][1])]
+    # PERBAIKAN UTAMA: Mengubah b[1][1] menjadi b[0][1] agar membaca koordinat Y dari box secara benar
+    kontur_kolom = [c for _, c in sorted(zip(boxes, kontur_kolom), key=lambda b: b[0][1])]
     
     grup_soal_kolom = []
     while len(kontur_kolom) >= 5:
@@ -154,9 +154,8 @@ with tab2:
             ans_letters = ['A', 'B', 'C', 'D', 'E']
             detail_jawaban = []
 
-            # PROTEKSI UTAMA: Jalankan pencarian otomatis hanya jika terdeteksi bulatan LJK minimal yang masuk akal
+            # Jalankan pencarian otomatis jika terdeteksi bulatan LJK minimal
             if len(kontur_valid) >= 25:
-                # SOLUSI: Menggunakan pembagian 3 wilayah kolom adaptif berdasarkan nilai X minimum & maksimum yang riil terfoto
                 min_x, max_x = min(koordinat_x), max(koordinat_x)
                 rentang_x = max_x - min_x
                 
@@ -176,7 +175,7 @@ with tab2:
                     else:
                         raw_kanan.append(c)
 
-                # Jalankan fungsi sortir aman (kebal dari ValueError kosong)
+                # Jalankan fungsi sortir aman yang sudah diperbaiki
                 grup_kiri = proses_satu_kolom_aman(raw_kiri, thresh, ans_letters)
                 grup_tengah = proses_satu_kolom_aman(raw_tengah, thresh, ans_letters)
                 grup_kanan = proses_satu_kolom_aman(raw_kanan, thresh, ans_letters)
@@ -219,7 +218,6 @@ with tab2:
                     status_koreksi = "GAGAL STRUKTUR (Kertas terlalu miring/bergelombang ekstrem)"
                     nilai_akhir = 0.0
             else:
-                # Jika foto blur parah atau bukan LJK, kunci ke 0 tanpa crash
                 soal_salah = total_soal_aktif
                 nilai_akhir = 0.0
                 status_koreksi = f"MOHON DEKATKAN KAMERA (Hanya mendeteksi {len(kontur_valid)} bulatan valid)"
