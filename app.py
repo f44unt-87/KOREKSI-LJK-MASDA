@@ -15,6 +15,41 @@ def urutkan_kontur(cnts, method="left-to-right"):
     cnts, _ = zip(*sorted(zip(cnts, boundingBoxes), key=lambda b: b[1][i], reverse=reverse))
     return cnts
 
+def proses_satu_kolom(kontur_kolom, thresh, ans_letters):
+    """Memproses pengelompokan baris 5 pilihan (A-E) khusus di dalam wilayah satu kolom saja"""
+    if len(kontur_kolom) < 5:
+        return []
+        
+    # Urutkan dari atas ke bawah secara ketat
+    boundingBoxes = [cv2.boundingRect(c) for c in kontur_kolom]
+    kontur_kolom = [c for _, c in sorted(zip(boundingBoxes, kontur_kolom), key=lambda b: b[1][1])]
+    
+    grup_soal_kolom = []
+    while len(kontur_kolom) >= 5:
+        anchor_y = cv2.boundingRect(kontur_kolom[0])[1]
+        sebaris = []
+        sisa = []
+        
+        # Ambil bulatan yang sejajar horizontal di kolom ini
+        for c in kontur_kolom:
+            y_curr = cv2.boundingRect(c)[1]
+            if abs(y_curr - anchor_y) < 25:
+                sebaris.append(c)
+            else:
+                sisa.append(c)
+                
+        if len(sebaris) >= 5:
+            # Urutkan dari kiri ke kanan (A, B, C, D, E)
+            sebaris_boxes = [cv2.boundingRect(cg) for cg in sebaris]
+            sebaris = [cg for _, cg in sorted(zip(sebaris_boxes, sebaris), key=lambda b: b[0][0])]
+            grup_soal_kolom.append(sebaris[:5])
+            
+        kontur_kolom = sisa
+        if len(sebaris) < 5 and kontur_kolom:
+            kontur_kolom.pop(0)
+            
+    return grup_soal_kolom
+
 # --- JUDUL UTAMA ---
 st.title("🏛️ KOREKSI CEPAT MASLAKUL HUDA")
 st.write("Sistem Pemindai LJK Otomatis Multi-Blok Sempurna - MA Maslakul Huda")
@@ -69,7 +104,7 @@ with tab1:
     st.success("✅ Kunci Jawaban berhasil disimpan! Silakan pindah ke TAB 2 di atas.")
 
 # ==========================================
-# TAB 2: AUTOMATIC SCANNING & WA (PERBAIKAN FITUR MORPHOLOGY)
+# TAB 2: AUTOMATIC SCANNING & WA (PERBAIKAN TOTAL 3 KOLOM)
 # ==========================================
 with tab2:
     total_soal_aktif = st.session_state.get('total_soal', 30)
@@ -89,86 +124,70 @@ with tab2:
         input_gambar = st.file_uploader("Atau pilih file gambar dari Galeri iPhone", type=["jpg", "jpeg", "png"])
 
     if input_gambar is not None:
-        with st.spinner("Mesin canggih sedang menutup kebocoran lingkaran..."):
+        with st.spinner("Memisahkan area 3 kolom LJK Maslakul Huda secara independen..."):
             file_bytes = np.asarray(bytearray(input_gambar.read()), dtype=np.uint8)
             image = cv2.imdecode(file_bytes, 1)
+            h_img, w_img, _ = image.shape
             output = image.copy()
             
-            # --- 1. PRE-PROCESSING & MORPHOLOGY ADVANCED ---
+            # --- 1. PRE-PROCESSING & FILTRASI TINTA ---
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
             thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
             
-            # SOLUSI UTAMA: Menggunakan kernel lingkaran untuk menutup lubang donat tengah bulatan LJK
+            # Penutupan lubang donat tengah bulatan
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
             thresh_closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
             
-            # Mengisi area dalam kontur agar menjadi lingkaran padat utuh (Flood Fill Logic)
             cnts, _ = cv2.findContours(thresh_closed.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             mask_solid = np.zeros(thresh.shape, dtype="uint8")
             for c in cnts:
                 cv2.drawContours(mask_solid, [c], -1, 255, -1)
 
-            # --- 2. SELEKSI GEOMETRI BULATAN PADAT ---
             cnts_final, _ = cv2.findContours(mask_solid.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            kontur_lingkaran = []
+            
+            # --- 2. PEMBELAHAN WILAYAH 3 KOLOM SECARA TEGAS ---
+            raw_kiri = []
+            raw_tengah = []
+            raw_kanan = []
             
             for c in cnts_final:
                 (x, y, w, h) = cv2.boundingRect(c)
                 ar = w / float(h)
-                # Filter ketat pasca penyatuan objek padat
+                # Mengabaikan teks angka kecil dan kotak luar raksasa
                 if 14 <= w <= 55 and 14 <= h <= 55 and 0.75 <= ar <= 1.25:
-                    kontur_lingkaran.append(c)
+                    # Memilah kontur berdasarkan koordinat X absolut lebar gambar
+                    if x < w_img * 0.38:
+                        raw_kiri.append(c)
+                    elif x < w_img * 0.68:
+                        raw_tengah.append(c)
+                    else:
+                        raw_kanan.append(c)
+
+            # --- 3. PROSES PENGELOMPOKAN MANDIRI PER KOLOM ---
+            ans_letters = ['A', 'B', 'C', 'D', 'E']
+            grup_kiri = proses_satu_kolom(raw_kiri, thresh, ans_letters)
+            grup_tengah = proses_satu_kolom(raw_tengah, thresh, ans_letters)
+            grup_kanan = proses_satu_kolom(raw_kanan, thresh, ans_letters)
+            
+            # Gabungkan sesuai urutan blok LJK Maslakul Huda Anda yang sebenarnya:
+            # Kolom Kiri dahulu (Soal 1-20), lalu Kolom Tengah (Soal 21-30), lalu Kolom Kanan (Soal 31-50)
+            list_soal_kontur_final = grup_kiri + grup_tengah + grup_kanan
 
             soal_benar = 0
             soal_salah = 0
             skor_didapat = 0
-            ans_letters = ['A', 'B', 'C', 'D', 'E']
             detail_jawaban = []
 
-            # Menurunkan batas pengaman minimum agar bagian atas-bawah kertas yang terpotong tidak memicu error
-            batas_toleransi_minimal = int((total_soal_aktif * 5) * 0.70)
-
-            if len(kontur_lingkaran) >= batas_toleransi_minimal:
-                boundingBoxes = [cv2.boundingRect(c) for c in kontur_lingkaran]
-                kontur_lingkaran = [c for _, c in sorted(zip(boundingBoxes, kontur_lingkaran), key=lambda b: b[0][1])]
-                
-                list_soal_kontur = []
-                while len(kontur_lingkaran) >= 5:
-                    anchor_y = cv2.boundingRect(kontur_lingkaran[0])[1]
-                    sebaris = []
-                    sisa = []
-                    for c in kontur_lingkaran:
-                        y_curr = cv2.boundingRect(c)[1]
-                        if abs(y_curr - anchor_y) < 30: # Melonggarkan jendela baris bergelombang
-                            sebaris.append(c)
-                        else:
-                            sisa.append(c)
-                    
-                    if len(sebaris) >= 5:
-                        sebaris_boxes = [cv2.boundingRect(cg) for cg in sebaris]
-                        sebaris = [cg for _, cg in sorted(zip(sebaris_boxes, sebaris), key=lambda b: b[0][0])]
-                        list_soal_kontur.append(sebaris[:5])
-                    
-                    kontur_lingkaran = sisa
-                    if len(sebaris) < 5:
-                        if kontur_lingkaran:
-                            kontur_lingkaran.pop(0)
-
-                def urutan_blok_maslakul(grup):
-                    box = cv2.boundingRect(grup[0])
-                    return (int(box[0] / 220), box[1])
-                
-                list_soal_kontur = sorted(list_soal_kontur, key=urutan_blok_maslakul)
-
-                for q in range(min(total_soal_aktif, len(list_soal_kontur))):
-                    cnts_pilihan = list_soal_kontur[q]
+            if len(list_soal_kontur_final) > 0:
+                # Batasi perulangan hanya sebanyak jumlah soal yang diinput guru di Tab 1
+                for q in range(min(total_soal_aktif, len(list_soal_kontur_final))):
+                    cnts_pilihan = list_soal_kontur_final[q]
                     
                     diarsir = None
                     for j, c in enumerate(cnts_pilihan):
                         mask = np.zeros(thresh.shape, dtype="uint8")
                         cv2.drawContours(mask, [c], -1, 255, -1)
-                        # Hitung kepekatan tinta hitam arsiran di dalam bulatan solid
                         mask = cv2.bitwise_and(thresh, mask)
                         total = cv2.countNonZero(mask)
                         
@@ -181,22 +200,23 @@ with tab2:
                     if huruf_terdeteksi == huruf_kunci:
                         soal_benar += 1
                         skor_didapat += bobot_aktif
-                        warna = (0, 255, 0)
-                        detail_jawaban.append(f"No. {q+1}: ✅ (Siswa: {huruf_terdeteksi} | Kunci: {huruf_kunci})")
+                        warna = (0, 255, 0) # Hijau jika benar
+                        detail_jawaban.append(f"No. {q+1}:  (Siswa: {huruf_terdeteksi} | Kunci: {huruf_kunci})")
                     else:
                         soal_salah += 1
-                        warna = (0, 0, 255)
+                        warna = (0, 0, 255) # Merah jika salah
                         detail_jawaban.append(f"No. {q+1}: ❌ (Siswa: {huruf_terdeteksi} | Kunci: {huruf_kunci})")
                         
+                    # Gambar tanda koreksi tepat pada lingkaran kunci jawaban di layar
                     cv2.drawContours(output, [cnts_pilihan[ans_letters.index(huruf_kunci)]], -1, warna, 3)
 
                 nilai_akhir = (skor_didapat / max_skor_aktif) * 100
-                status_koreksi = "BERHASIL OTOMATIS SAKTI"
+                status_koreksi = "BERHASIL OTOMATIS (SANGAT PRESISI)"
             else:
                 soal_benar = 0
                 soal_salah = total_soal_aktif
                 nilai_akhir = 0.0
-                status_koreksi = f"FOTO KURANG DEKAT (Terdeteksi {len(kontur_lingkaran)} bulatan dari syarat {batas_toleransi_minimal})"
+                status_koreksi = "FOTO KURANG DEKAT ATAU TERPOTONG (Gagal memisahkan kolom)"
 
             st.success("✨ Analisis Selesai!")
 
@@ -221,7 +241,7 @@ with tab2:
                 for line in detail_jawaban:
                     st.write(line)
 
-            st.image(output, channels="BGR", caption="Hasil Analisis Sempurna")
+            st.image(output, channels="BGR", caption="Hasil Analisis Kolom Sempurna")
 
             st.markdown("---")
             
