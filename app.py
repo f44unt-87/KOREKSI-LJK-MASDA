@@ -6,50 +6,36 @@ import urllib.parse
 # Konfigurasi Tampilan Halaman Utama di iPhone
 st.set_page_config(page_title="KOREKSI CEPAT MASLAKUL HUDA", layout="centered")
 
-def urutkan_kontur(cnts, method="left-to-right"):
-    if not cnts:
-        return []
-    i = 1 if method in ["top-to-bottom", "bottom-to-top"] else 0
-    reverse = method in ["right-to-left", "bottom-to-top"]
-    boundingBoxes = [cv2.boundingRect(c) for c in cnts]
-    cnts, _ = zip(*sorted(zip(cnts, boundingBoxes), key=lambda b: b[1][i], reverse=reverse))
-    return cnts
-
 # --- JUDUL UTAMA ---
 st.title("🏛️ KOREKSI CEPAT MASLAKUL HUDA")
-st.write("Sistem Pemindai LJK Otomatis Dinamis dengan Set Bobot Instan & WA")
+st.write("Aplikasi Bantu Koreksi LJK Terintegrasi WhatsApp - MA Maslakul Huda")
 st.markdown("---")
 
 # --- MEMBUAT 2 TAB ---
-tab1, tab2 = st.tabs(["⚙️ TAB 1: Pengaturan Ujian & Kunci", "📷 TAB 2: Scan LJK & Kirim WA"])
+tab1, tab2 = st.tabs(["⚙️ TAB 1: Set Ujian & Kunci", "📝 TAB 2: Input Jawaban Siswa & Kirim WA"])
 
 # ==========================================
-# TAB 1: PENGATURAN MAPEL, JUMLAH SOAL, KUNCI & BOBOT INSTAN
+# TAB 1: PENGATURAN MAPEL, JUMLAH SOAL & KUNCI
 # ==========================================
 with tab1:
     st.subheader("📋 Informasi Mata Pelajaran")
-    nama_mapel = st.text_input("Nama Mata Pelajaran", value="Fawaidul Fiqhiyyah")
-    kelas_ujian = st.text_input("Kelas Ujian", value="10-A")
+    nama_mapel = st.text_input("Nama Mata Pelajaran", value="Fiqih")
+    kelas_ujian = st.text_input("Kelas Ujian / Ruang", value="11-A")
     
-    st.subheader("🔢 Konfigurasi Jumlah & Bobot Soal")
+    st.subheader("🔢 Konfigurasi Ujian")
     col_jsoal, col_jbobot = st.columns(2)
     with col_jsoal:
-        jumlah_soal = st.number_input("Masukkan Jumlah Soal Ujian", min_value=1, max_value=50, value=5, step=1)
+        jumlah_soal = st.number_input("Jumlah Soal Ujian (Pilihan Ganda)", min_value=1, max_value=50, value=10, step=1)
     with col_jbobot:
-        # Mengatur bobot sama rata untuk semua nomor soal
-        bobot_sama_rata = st.number_input("Ketentuan Nilai Tiap 1 Soal", min_value=1, max_value=100, value=2, step=1)
+        bobot_sama_rata = st.number_input("Ketentuan Nilai Tiap 1 Soal", min_value=1, max_value=100, value=10, step=1)
     
-    st.subheader(f"🔑 Atur Kunci Jawaban ({jumlah_soal} Soal)")
-    st.write("Silakan tentukan pilihan kunci jawaban untuk tiap nomor:")
+    st.subheader(f"🔑 Atur Kunci Jawaban Resmi ({jumlah_soal} Soal)")
+    st.write("Tentukan kunci jawaban yang benar untuk acuan penilaian:")
     
-    kunci_user_input = {}
-    bobot_user_input = {}
-    ans_map = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
-    default_keys = ['A', 'C', 'D', 'B', 'E']
+    kunci_master = {}
+    default_keys = ['A', 'B', 'C', 'D', 'E']
     
-    # --- PERBAIKAN LOGIKA URUTAN NOMOR ---
-    # Membuat container kosong untuk menampung baris-baris berurutan
-    # Setiap baris diisi maksimal 5 kolom agar pas dengan layar iPhone
+    # Menampilkan grid kunci jawaban yang urut dari nomor 1 sampai terakhir
     for base_idx in range(0, jumlah_soal, 5):
         cols = st.columns(5)
         for sub_idx in range(5):
@@ -61,151 +47,151 @@ with tab1:
                         f"Soal {idx+1}", 
                         ['A', 'B', 'C', 'D', 'E'], 
                         index=['A', 'B', 'C', 'D', 'E'].index(def_val), 
-                        key=f"kunci_{idx}"
+                        key=f"master_kunci_{idx}"
                     )
-                    kunci_user_input[idx] = ans_map[pilihan]
-                    bobot_user_input[idx] = bobot_sama_rata
+                    kunci_master[idx] = pilihan
             
-    # Hitung total skor maksimal otomatis
-    total_bobot_maksimal = jumlah_soal * bobot_sama_rata
-    st.info(f"📊 **Ringkasan Ketentuan:** Tiap soal bernilai {bobot_sama_rata} poin. Total skor maksimal ujian adalah **{total_bobot_maksimal}**.")
+    total_skor_max = jumlah_soal * bobot_sama_rata
+    st.info(f"📊 **Ringkasan:** Total {jumlah_soal} soal dengan nilai kelipatan {bobot_sama_rata}. Total Skor Maksimal = {total_skor_max}.")
 
-    # Simpan semua konfigurasi ke session state iPhone
-    st.session_state['kunci'] = kunci_user_input
-    st.session_state['bobot'] = bobot_user_input
-    st.session_state['total_bobot_max'] = total_bobot_maksimal
+    # Simpan ke session state
+    st.session_state['kunci_master'] = kunci_master
     st.session_state['total_soal'] = jumlah_soal
+    st.session_state['bobot_per_soal'] = bobot_sama_rata
+    st.session_state['total_skor_max'] = total_skor_max
     st.session_state['mapel'] = nama_mapel
     st.session_state['kelas_ujian'] = kelas_ujian
     
-    st.success("✅ Kunci jawaban dan ketentuan bobot otomatis berhasil disimpan! Silakan lanjut ke TAB 2.")
+    st.success("✅ Kunci Jawaban Ujian berhasil disimpan! Silakan pindah ke TAB 2 di atas.")
 
 # ==========================================
-# TAB 2: UPLOAD GAMBAR, PROSES SCAN & WA
+# TAB 2: INPUT JAWABAN SISWA & WHATSAPP
 # ==========================================
 with tab2:
-    st.subheader("📸 Scan Lembar Jawaban Komputer")
+    st.subheader("👤 Identitas Siswa")
+    st.write("Silakan masukkan identitas siswa yang sedang dikoreksi:")
     
-    # Tarik data konfigurasi dari memori TAB 1
-    total_soal_aktif = st.session_state.get('total_soal', 5)
-    kunci_user_aktif = st.session_state.get('kunci', {0: 0, 1: 2, 2: 3, 3: 0, 4: 4})
-    bobot_user_aktif = st.session_state.get('bobot', {0: 2, 1: 2, 2: 2, 3: 2, 4: 2})
-    total_bobot_max_aktif = st.session_state.get('total_bobot_max', 10)
-    mapel_aktif = st.session_state.get('mapel', "Fawaidul Fiqhiyyah")
-    kelas_ujian_aktif = st.session_state.get('kelas_ujian', "10-A")
-    
-    input_gambar = st.camera_input("Ambil Foto LJK Siswa")
+    col_nama, col_kelas = st.columns([2, 1])
+    with col_nama:
+        nama_siswa = st.text_input("Nama Lengkap Siswa", placeholder="Contoh: Ahmad Rehan Fadilah")
+    with col_kelas:
+        kelas_siswa = st.text_input("Kelas", value=st.session_state.get('kelas_ujian', ""))
+
+    st.markdown("---")
+    st.subheader("📷 Bukti Arsip LJK (Opsional)")
+    input_gambar = st.camera_input("Ambil Foto Kertas LJK (Sebagai dokumentasi arsip)")
     if input_gambar is None:
-        input_gambar = st.file_uploader("Atau pilih file gambar dari Galeri iPhone", type=["jpg", "jpeg", "png"])
+        input_gambar = st.file_uploader("Atau upload file dari Galeri iPhone", type=["jpg", "jpeg", "png"])
 
-    if input_gambar is not None:
-        with st.spinner("Membaca data LJK & menghitung nilai..."):
-            file_bytes = np.asarray(bytearray(input_gambar.read()), dtype=np.uint8)
-            image = cv2.imdecode(file_bytes, 1)
-            output = image.copy()
+    st.markdown("---")
+    
+    # Ambil data dari TAB 1
+    total_soal_aktif = st.session_state.get('total_soal', 10)
+    kunci_master_aktif = st.session_state.get('kunci_master', {})
+    bobot_aktif = st.session_state.get('bobot_per_soal', 10)
+    max_skor_aktif = st.session_state.get('total_skor_max', 100)
+    mapel_aktif = st.session_state.get('mapel', "Fiqih")
 
-            # Pre-processing Gambar LJK
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+    st.subheader(f"✍️ Input Pilihan Jawaban {nama_siswa if nama_siswa else 'Siswa'}")
+    st.write("Ketuk pilihan huruf sesuai dengan lembar jawaban asli siswa di kertas:")
 
-            cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            kontur_lingkaran = []
-            for c in cnts:
-                (x, y, w, h) = cv2.boundingRect(c)
-                ar = w / float(h)
-                if w >= 20 and h >= 20 and 0.8 <= ar <= 1.2:
-                    kontur_lingkaran.append(c)
+    jawaban_siswa = {}
+    # Menampilkan tombol pilihan jawaban siswa secara berurutan nomor 1 sampai terakhir
+    for base_idx in range(0, total_soal_aktif, 5):
+        cols = st.columns(5)
+        for sub_idx in range(5):
+            idx = base_idx + sub_idx
+            if idx < total_soal_aktif:
+                with cols[sub_idx]:
+                    pilihan_siswa = st.radio(
+                        f"No. {idx+1}",
+                        ['A', 'B', 'C', 'D', 'E'],
+                        index=0,
+                        key=f"siswa_ans_{idx}"
+                    )
+                    jawaban_siswa[idx] = pilihan_siswa
 
-            target_bulatan = total_soal_aktif * 5
-            skor_didapat = 0
+    st.markdown("---")
+    
+    # --- PROSES HITUNG OTOMATIS ---
+    if st.button("🚀 HITUNG NILAI AKHIR", type="primary"):
+        if not nama_siswa.strip():
+            st.error("⚠️ Mohon isi Nama Lengkap Siswa terlebih dahulu!")
+        else:
             soal_benar = 0
+            skor_didapat = 0
+            detail_koreksi = []
+
+            for idx in range(total_soal_aktif):
+                kunci_benar = kunci_master_aktif.get(idx, 'A')
+                ans_siswa = jawaban_siswa.get(idx, 'A')
+                
+                if ans_siswa == kunci_benar:
+                    soal_benar += 1
+                    skor_didapat += bobot_aktif
+                    detail_koreksi.append(f"No. {idx+1}:  (Siswa: {ans_siswa} | Kunci: {kunci_benar})")
+                else:
+                    detail_koreksi.append(f"No. {idx+1}: ❌ (Siswa: {ans_siswa} | Kunci: {kunci_benar})")
+
+            nilai_final = (skor_didapat / max_skor_aktif) * 100
+
+            st.success(f"🎉 Penilaian untuk {nama_siswa.upper()} Berhasil Dihitung!")
             
-            if len(kontur_lingkaran) >= target_bulatan:
-                kontur_lingkaran = urutkan_kontur(kontur_lingkaran, method="top-to-bottom")
-
-                for q in range(total_soal_aktif):
-                    start_idx = q * 5
-                    cnts_pilihan = urutkan_kontur(kontur_lingkaran[start_idx:start_idx + 5], method="left-to-right")
-                    diarsir = None
-                    
-                    for j, c in enumerate(cnts_pilihan):
-                        mask = np.zeros(thresh.shape, dtype="uint8")
-                        cv2.drawContours(mask, [c], -1, 255, -1)
-                        mask = cv2.bitwise_and(thresh, mask)
-                        total = cv2.countNonZero(mask)
-                        if diarsir is None or total > diarsir[0]:
-                            diarsir = (total, j)
-
-                    kunci = kunci_user_aktif.get(q, 0)
-                    warna = (0, 255, 0) if kunci == diarsir[1] else (0, 0, 255)
-                    
-                    if kunci == diarsir[1]:
-                        soal_benar += 1
-                        skor_didapat += bobot_user_aktif.get(q, 2)
-                        
-                    cv2.drawContours(output, [cnts_pilihan[kunci]], -1, warna, 3)
-
-                nilai_akhir = (skor_didapat / total_bobot_max_aktif) * 100
-                status_scan = "SUKSES"
-            else:
-                soal_benar = int(total_soal_aktif * 0.8)
-                skor_didapat = sum([bobot_user_aktif.get(i, 2) for i in range(soal_benar)])
-                nilai_akhir = (skor_didapat / total_bobot_max_aktif) * 100
-                status_scan = f"SIMULASI (Kamera miring/terdeteksi {len(kontur_lingkaran)} bulatan)"
-
-            # --- AUTOMATION EXTRACTION DATA ---
-            nama_terdeteksi = "AHMAD REHAN FADILAH"
-            kelas_terdeteksi = kelas_ujian_aktif
-
-            st.success("✨ LJK berhasil dikoreksi!")
-
-            st.markdown("### 📝 Hasil Pembacaan Otomatis LJK")
-            nama_siswa = st.text_input("Nama Siswa (Terisi Otomatis)", value=nama_terdeteksi)
-            kelas_siswa = st.text_input("Kelas Siswa (Terisi Otomatis)", value=kelas_terdeteksi)
+            # Tampilan Box Hasil Laporan
+            st.markdown(f"""
+            ### 📋 LAPORAN HASIL PENILAIAN
+            * **Nama Siswa** : {nama_siswa.upper()}
+            * **Kelas** : {kelas_siswa.upper()}
+            * **Mata Pelajaran** : {mapel_aktif.upper()}
             
-            st.info(f"🎯 **Hasil Nilai {nama_siswa}: Benar {soal_benar}/{total_soal_aktif} Soal | Skor: {skor_didapat}/{total_bobot_max_aktif} | NILAI AKHIR: {nilai_akhir:.2f}** ({status_scan})")
-            st.image(output, channels="BGR", caption="Analisis Koreksi Lembar Jawaban")
-
-            st.markdown("---")
+            **🎯 SKOR PEROLEHAN:**
+            * Jumlah Benar : **{soal_benar} / {total_soal_aktif} Soal**
+            * Total Skor : **{skor_didapat} / {max_skor_aktif} Poin**
+            * ## 💯 NILAI AKHIR: {nilai_final:.2f}
+            """)
             
-            # --- FITUR KIRIM WHATSAPP ---
+            with st.expander("🔍 Lihat Detail Jawaban Benar/Salah"):
+                for line in detail_koreksi:
+                    st.write(line)
+
+            # --- INTEGRASI WHATSAPP WA ---
             st.subheader("📲 Kirim Hasil Nilai ke WhatsApp")
-            no_wa = st.text_input("Masukkan Nomor WA Tujuan", value="628xxxxxxxxxx")
+            no_wa = st.text_input("Masukkan Nomor WA (Wali Murid / Guru)", placeholder="Contoh: 628123456789")
             
             pesan_wa = (
                 f"🚨 *LAPORAN HASIL UJIAN SISWA*\n"
                 f"=========================\n"
-                f"🏛️ *Madrasah Maslakul Huda*\n\n"
+                f"🏛️ *Madrasah Aliyah Maslakul Huda*\n\n"
                 f"• *Nama Siswa* : {nama_siswa.upper()}\n"
                 f"• *Kelas* : {kelas_siswa.upper()}\n"
                 f"• *Mata Pelajaran* : {mapel_aktif.upper()}\n"
                 f"-----------------------------------------\n"
-                f"📊 *HASIL KOREKSI LJK*:\n"
+                f"📊 *HASIL KOREKSI PENILAIAN*:\n"
                 f"• Jumlah Benar : {soal_benar} / {total_soal_aktif} Soal\n"
-                f"• Total Skor : {skor_didapat} / {total_bobot_max_aktif}\n"
-                f"• *💯 NILAI AKHIR : {nilai_akhir:.2f}*\n"
+                f"• Total Skor Poin : {skor_didapat} / {max_skor_aktif}\n"
+                f"• *💯 NILAI AKHIR : {nilai_final:.2f}*\n"
                 f"=========================\n"
-                f"_Pesan dikirim otomatis melalui Aplikasi Koreksi Cepat._"
+                f"_Pesan dikirim resmi melalui Aplikasi Koreksi Cepat Maslakul Huda._"
             )
             
             pesan_encoded = urllib.parse.quote(pesan_wa)
             link_wa = f"https://api.whatsapp.com/send?phone={no_wa.strip()}&text={pesan_encoded}"
 
-            st.markdown(f'''
-                <a href="{link_wa}" target="_blank">
-                    <button style="
-                        width: 100%;
-                        background-color: #25D366;
-                        color: white;
-                        padding: 12px 20px;
-                        border: none;
-                        border-radius: 8px;
-                        font-weight: bold;
-                        font-size: 16px;
-                        cursor: pointer;
-                        text-align: center;">
-                        🟢 KIRIM SEKARANG VIA WHATSAPP
-                    </button>
-                </a>
-            ''', unsafe_allow_html=True)
+            if no_wa:
+                st.markdown(f'''
+                    <a href="{link_wa}" target="_blank">
+                        <button style="
+                            width: 100%;
+                            background-color: #25D366;
+                            color: white;
+                            padding: 14px 20px;
+                            border: none;
+                            border-radius: 8px;
+                            font-weight: bold;
+                            font-size: 16px;
+                            cursor: pointer;
+                            text-align: center;">
+                            🟢 KIRIM SEKARANG VIA WHATSAPP
+                        </button>
+                    </a>
+                ''', unsafe_allow_html=True)
