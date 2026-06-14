@@ -17,7 +17,7 @@ def urutkan_kontur(cnts, method="left-to-right"):
 
 # --- JUDUL UTAMA ---
 st.title("🏛️ KOREKSI CEPAT MASLAKUL HUDA")
-st.write("Sistem Pemindai LJK Otomatis Multi-Blok Presisi Tinggi - MA Maslakul Huda")
+st.write("Sistem Pemindai LJK Otomatis Multi-Blok Sempurna - MA Maslakul Huda")
 st.markdown("---")
 
 # --- MEMBUAT 2 TAB ---
@@ -34,24 +34,20 @@ with tab1:
     st.subheader("🔢 Konfigurasi Penilaian")
     col_jsoal, col_jbobot = st.columns(2)
     with col_jsoal:
-        jumlah_soal = st.number_input("Jumlah Soal Ujian (Pilihan Ganda)", min_value=1, max_value=50, value=30, step=1)
+        jumlah_soal = st.number_input("Masukkan Jumlah Soal Ujian", min_value=1, max_value=50, value=30, step=1)
     with col_jbobot:
         bobot_sama_rata = st.number_input("Ketentuan Nilai Tiap 1 Soal", min_value=1, max_value=100, value=2, step=1)
     
     st.subheader(f"🔑 Atur Kunci Jawaban Resmi ({jumlah_soal} Soal)")
-    st.write("Sesuai permintaan, semua nomor default diatur ke **B** untuk mempermudah pengisian:")
+    st.write("Semua nomor otomatis diatur awal ke posisi B agar mudah digeser:")
     
     kunci_master = {}
-    ans_map = {'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4}
-    
-    # Grid input kunci jawaban urut baris horizontal (1-5, 6-10, dst)
     for base_idx in range(0, jumlah_soal, 5):
         cols = st.columns(5)
         for sub_idx in range(5):
             idx = base_idx + sub_idx
             if idx < jumlah_soal:
                 with cols[sub_idx]:
-                    # MODIFIKASI: Default index dipaksa ke posisi 1 (artinya huruf 'B')
                     pilihan = st.selectbox(
                         f"Soal {idx+1}", 
                         ['A', 'B', 'C', 'D', 'E'], 
@@ -73,7 +69,7 @@ with tab1:
     st.success("✅ Kunci Jawaban berhasil disimpan! Silakan pindah ke TAB 2 di atas.")
 
 # ==========================================
-# TAB 2: AUTOMATIC SCANNING & WA (PRESISI TINGGI)
+# TAB 2: AUTOMATIC SCANNING & WA (PERBAIKAN FITUR MORPHOLOGY)
 # ==========================================
 with tab2:
     total_soal_aktif = st.session_state.get('total_soal', 30)
@@ -93,24 +89,35 @@ with tab2:
         input_gambar = st.file_uploader("Atau pilih file gambar dari Galeri iPhone", type=["jpg", "jpeg", "png"])
 
     if input_gambar is not None:
-        with St.spinner("Memproses gambar dengan kecerdasan adaptif..."):
+        with st.spinner("Mesin canggih sedang menutup kebocoran lingkaran..."):
             file_bytes = np.asarray(bytearray(input_gambar.read()), dtype=np.uint8)
             image = cv2.imdecode(file_bytes, 1)
             output = image.copy()
             
-            # Pre-processing Adaptif Ekstrem
+            # --- 1. PRE-PROCESSING & MORPHOLOGY ADVANCED ---
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.medianBlur(gray, 3)
-            thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 7)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+            
+            # SOLUSI UTAMA: Menggunakan kernel lingkaran untuk menutup lubang donat tengah bulatan LJK
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            thresh_closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            
+            # Mengisi area dalam kontur agar menjadi lingkaran padat utuh (Flood Fill Logic)
+            cnts, _ = cv2.findContours(thresh_closed.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            mask_solid = np.zeros(thresh.shape, dtype="uint8")
+            for c in cnts:
+                cv2.drawContours(mask_solid, [c], -1, 255, -1)
 
-            # Pelonggaran Filter Geometri Bulatan
-            cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # --- 2. SELEKSI GEOMETRI BULATAN PADAT ---
+            cnts_final, _ = cv2.findContours(mask_solid.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             kontur_lingkaran = []
             
-            for c in cnts:
+            for c in cnts_final:
                 (x, y, w, h) = cv2.boundingRect(c)
                 ar = w / float(h)
-                if 10 <= w <= 70 and 10 <= h <= 70 and 0.65 <= ar <= 1.45:
+                # Filter ketat pasca penyatuan objek padat
+                if 14 <= w <= 55 and 14 <= h <= 55 and 0.75 <= ar <= 1.25:
                     kontur_lingkaran.append(c)
 
             soal_benar = 0
@@ -119,7 +126,8 @@ with tab2:
             ans_letters = ['A', 'B', 'C', 'D', 'E']
             detail_jawaban = []
 
-            batas_toleransi_minimal = int((total_soal_aktif * 5) * 0.75)
+            # Menurunkan batas pengaman minimum agar bagian atas-bawah kertas yang terpotong tidak memicu error
+            batas_toleransi_minimal = int((total_soal_aktif * 5) * 0.70)
 
             if len(kontur_lingkaran) >= batas_toleransi_minimal:
                 boundingBoxes = [cv2.boundingRect(c) for c in kontur_lingkaran]
@@ -132,7 +140,7 @@ with tab2:
                     sisa = []
                     for c in kontur_lingkaran:
                         y_curr = cv2.boundingRect(c)[1]
-                        if abs(y_curr - anchor_y) < 25:
+                        if abs(y_curr - anchor_y) < 30: # Melonggarkan jendela baris bergelombang
                             sebaris.append(c)
                         else:
                             sisa.append(c)
@@ -149,7 +157,7 @@ with tab2:
 
                 def urutan_blok_maslakul(grup):
                     box = cv2.boundingRect(grup[0])
-                    return (int(box[0] / 200), box[1])
+                    return (int(box[0] / 220), box[1])
                 
                 list_soal_kontur = sorted(list_soal_kontur, key=urutan_blok_maslakul)
 
@@ -160,6 +168,7 @@ with tab2:
                     for j, c in enumerate(cnts_pilihan):
                         mask = np.zeros(thresh.shape, dtype="uint8")
                         cv2.drawContours(mask, [c], -1, 255, -1)
+                        # Hitung kepekatan tinta hitam arsiran di dalam bulatan solid
                         mask = cv2.bitwise_and(thresh, mask)
                         total = cv2.countNonZero(mask)
                         
@@ -182,12 +191,12 @@ with tab2:
                     cv2.drawContours(output, [cnts_pilihan[ans_letters.index(huruf_kunci)]], -1, warna, 3)
 
                 nilai_akhir = (skor_didapat / max_skor_aktif) * 100
-                status_koreksi = "BERHASIL OTOMATIS (MODE TOLERANSI TINGGI)"
+                status_koreksi = "BERHASIL OTOMATIS SAKTI"
             else:
                 soal_benar = 0
                 soal_salah = total_soal_aktif
                 nilai_akhir = 0.0
-                status_koreksi = f"FOTO TERLALU JAUH / TERPOTONG (Terdeteksi {len(kontur_lingkaran)} bulatan)"
+                status_koreksi = f"FOTO KURANG DEKAT (Terdeteksi {len(kontur_lingkaran)} bulatan dari syarat {batas_toleransi_minimal})"
 
             st.success("✨ Analisis Selesai!")
 
@@ -212,16 +221,14 @@ with tab2:
                 for line in detail_jawaban:
                     st.write(line)
 
-            st.image(output, channels="BGR", caption="Hasil Analisis Kamera")
+            st.image(output, channels="BGR", caption="Hasil Analisis Sempurna")
 
             st.markdown("---")
             
             # --- INTEGRASI WHATSAPP WA ---
             st.subheader("📲 Kirim Hasil Nilai ke WhatsApp")
-            # MODIFIKASI: Form nomor langsung otomatis diisi default nomor Anda
             no_wa_raw = st.text_input("Masukkan Nomor WA Penerima", value="081353539600")
             
-            # Membersihkan input agar otomatis memakai kode 62 internasional untuk WhatsApp Link
             no_wa_clean = no_wa_raw.strip()
             if no_wa_clean.startswith("0"):
                 no_wa_clean = "62" + no_wa_clean[1:]
