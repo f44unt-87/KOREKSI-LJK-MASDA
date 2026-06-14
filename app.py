@@ -6,18 +6,38 @@ import urllib.parse
 # Konfigurasi Tampilan Halaman Utama di iPhone
 st.set_page_config(page_title="KOREKSI CEPAT MASLAKUL HUDA", layout="centered")
 
-def urutkan_kontur(cnts, method="left-to-right"):
-    if not cnts:
-        return []
-    i = 1 if method in ["top-to-bottom", "bottom-to-top"] else 0
-    reverse = method in ["right-to-left", "bottom-to-top"]
-    boundingBoxes = [cv2.boundingRect(c) for c in cnts]
-    cnts, _ = zip(*sorted(zip(cnts, boundingBoxes), key=lambda b: b[1][i], reverse=reverse))
-    return cnts
+def dapatkan_perspektif(image, pts):
+    """Memperbaiki kemiringan foto berdasarkan 4 titik sudut agar kertas menjadi lurus sempurna"""
+    rect = np.zeros((4, 2), dtype="float32")
+    s = pts.sum(axis=1)
+    rect[0] = pts[np.argmin(s)]
+    rect[2] = pts[np.argmax(s)]
+    diff = np.diff(pts, axis=1)
+    rect[1] = pts[np.argmin(diff)]
+    rect[3] = pts[np.argmax(diff)]
+    
+    (tl, tr, br, bl) = rect
+    widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+    widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+    maxWidth = max(int(widthA), int(widthB))
+    
+    heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+    heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+    maxHeight = max(int(heightA), int(heightB))
+    
+    dst = np.array([
+        [0, 0],
+        [maxWidth - 1, 0],
+        [maxWidth - 1, maxHeight - 1],
+        [0, maxHeight - 1]], dtype="float32")
+    
+    M = cv2.getPerspectiveTransform(rect, dst)
+    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
+    return warped
 
 # --- JUDUL UTAMA ---
 st.title("🏛️ KOREKSI CEPAT MASLAKUL HUDA")
-st.write("Sistem Pemindai LJK Otomatis 3 Kolom Khusus MA Maslakul Huda")
+st.write("Sistem Pemindai LJK Otomatis Multi-Blok Presisi Tinggi - MA Maslakul Huda")
 st.markdown("---")
 
 # --- MEMBUAT 2 TAB ---
@@ -29,7 +49,7 @@ tab1, tab2 = st.tabs(["⚙️ TAB 1: Set Ujian & Kunci", "📷 TAB 2: Scan Otoma
 with tab1:
     st.subheader("📋 Informasi Ujian")
     nama_mapel = st.text_input("Nama Mata Pelajaran", value="Fiqih")
-    kelas_ujian = st.text_input("Kelas / Ruang", value="11-A")
+    kelas_ujian = st.text_input("Kelas / Ruang", value="10-E1")
     
     st.subheader("🔢 Konfigurasi Penilaian")
     col_jsoal, col_jbobot = st.columns(2)
@@ -39,12 +59,10 @@ with tab1:
         bobot_sama_rata = st.number_input("Ketentuan Nilai Tiap 1 Soal", min_value=1, max_value=100, value=2, step=1)
     
     st.subheader(f"🔑 Atur Kunci Jawaban Resmi ({jumlah_soal} Soal)")
-    st.write("Tentukan acuan kunci jawaban yang benar (Berurutan dari nomor 1):")
     
     kunci_master = {}
     default_keys = ['A', 'C', 'D', 'B', 'E']
     
-    # Grid input kunci jawaban urut nomor 1 sampai terakhir untuk memudahkan pengisian
     for base_idx in range(0, jumlah_soal, 5):
         cols = st.columns(5)
         for sub_idx in range(5):
@@ -63,7 +81,6 @@ with tab1:
     total_skor_max = jumlah_soal * bobot_sama_rata
     st.info(f"📊 **Ringkasan:** {jumlah_soal} soal aktif dengan bobot per nomor {bobot_sama_rata}. Total Skor Maksimal = {total_skor_max}.")
 
-    # Simpan ke session state
     st.session_state['kunci_master'] = kunci_master
     st.session_state['total_soal'] = jumlah_soal
     st.session_state['bobot_per_soal'] = bobot_sama_rata
@@ -74,7 +91,7 @@ with tab1:
     st.success("✅ Kunci Jawaban berhasil disimpan! Silakan pindah ke TAB 2 di atas.")
 
 # ==========================================
-# TAB 2: AUTOMATIC SCANNING & WA (100% OTOMATIS)
+# TAB 2: AUTOMATIC SCANNING & WA (PRESISI TINGGI)
 # ==========================================
 with tab2:
     total_soal_aktif = st.session_state.get('total_soal', 30)
@@ -82,76 +99,76 @@ with tab2:
     bobot_aktif = st.session_state.get('bobot_per_soal', 2)
     max_skor_aktif = st.session_state.get('total_skor_max', 60)
     mapel_aktif = st.session_state.get('mapel', "Fiqih")
-    kelas_ujian_aktif = st.session_state.get('kelas_ujian', "11-A")
+    kelas_ujian_aktif = st.session_state.get('kelas_ujian', "10-E1")
 
     st.subheader("📋 Data Kelas")
     kelas_siswa = st.text_input("Kelas / Ruang Siswa", value=kelas_ujian_aktif)
 
     st.markdown("---")
     st.subheader("📷 Ambil Foto LJK")
-    input_gambar = st.camera_input("Posisikan LJK Maslakul Huda secara lurus dan mendapat cahaya terang")
+    input_gambar = st.camera_input("Posisikan LJK Maslakul Huda secara lurus")
     if input_gambar is None:
         input_gambar = st.file_uploader("Atau pilih file gambar dari Galeri iPhone", type=["jpg", "jpeg", "png"])
 
     if input_gambar is not None:
-        with st.spinner("Mesin OpenCV sedang memisahkan kolom & menganalisis bulatan LJK..."):
+        with st.spinner("Menghitung akurasi bulatan LJK..."):
             file_bytes = np.asarray(bytearray(input_gambar.read()), dtype=np.uint8)
             image = cv2.imdecode(file_bytes, 1)
-            h_img, w_img, _ = image.shape
-            output = image.copy()
-
-            # Pre-processing Gambar
+            
+            # --- 1. PRE-PROCESSING UTAMA ---
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
             thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
 
-            # Mencari semua kontur berbentuk lingkaran di kertas
+            # --- 2. DETEKSI LINGKARAN & FILTER UKURAN YANG LEBIH KETAT ---
             cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             kontur_lingkaran = []
+            
             for c in cnts:
                 (x, y, w, h) = cv2.boundingRect(c)
                 ar = w / float(h)
-                if w >= 15 and h >= 15 and 0.7 <= ar <= 1.3:
+                # Filter ketat: Diameter bulatan LJK Anda biasanya berkisar di ukuran piksel ini
+                if 18 <= w <= 45 and 18 <= h <= 45 and 0.82 <= ar <= 1.18:
                     kontur_lingkaran.append(c)
 
-            # --- LOGIKA MODIFIKASI MULTI-KOLOM MASLAKUL HUDA ---
-            # Kita bagi koordinat X gambar menjadi 3 zona kolom vertikal (Kiri, Tengah, Kanan)
-            kolom_kiri = []
-            kolom_tengah = []
-            kolom_kanan = []
-
-            for c in kontur_lingkaran:
-                (x, y, w, h) = cv2.boundingRect(c)
-                # Memilah kontur berdasarkan posisi horizontal koordinat lebar gambar (W)
-                if x < w_img * 0.38:
-                    kolom_kiri.append(c)
-                elif x < w_img * 0.68:
-                    kolom_tengah.append(c)
-                else:
-                    kolom_kanan.append(c)
-
-            # Urutkan masing-masing kolom dari atas ke bawah secara independen
-            kolom_kiri = urutkan_kontur(kolom_kiri, method="top-to-bottom")
-            kolom_tengah = urutkan_kontur(kolom_tengah, method="top-to-bottom")
-            kolom_kanan = urutkan_kontur(kolom_kanan, method="top-to-bottom")
-
-            # Gabungkan kembali ke struktur nomor LJK Maslakul Huda asli
-            # Kolom Kiri = No 1-10 & 11-20 | Kolom Tengah = No 21-30 | Kolom Kanan = No 31-40 & 41-50
-            kontur_terstruktur = kolom_kiri + kolom_tengah + kolom_kanan
-
-            target_bulatan = total_soal_aktif * 5
             soal_benar = 0
             soal_salah = 0
             skor_didapat = 0
             ans_letters = ['A', 'B', 'C', 'D', 'E']
             detail_jawaban = []
+            output = image.copy()
 
-            # Validasi jika jumlah bulatan memenuhi sarat minimal deteksi
-            if len(kontur_terstruktur) >= target_bulatan:
-                for q in range(total_soal_aktif):
-                    start_idx = q * 5
-                    # Urutkan pilihan A-E dari kiri ke kanan
-                    cnts_pilihan = urutkan_kontur(kontur_terstruktur[start_idx:start_idx + 5], method="left-to-right")
+            # Melakukan penyortiran koordinat absolut agar tidak melompati baris nomor LJK Maslakul Huda
+            if len(kontur_lingkaran) >= (total_soal_aktif * 5):
+                # Urutkan berdasarkan koordinat Y (atas ke bawah) global terlebih dahulu
+                boundingBoxes = [cv2.boundingRect(c) for c in kontur_lingkaran]
+                kontur_lingkaran = [c for _, c in sorted(zip(boundingBoxes, kontur_lingkaran), key=lambda b: b[0][1])]
+                
+                # Memilah per sub-baris isi 5 bulatan (A-E) untuk mengunci akurasi per nomor soal
+                koreksi_sukses = True
+                jawaban_terdeteksi_all = {}
+                
+                # Kelompokkan bulatan ke dalam grup horizontal (soal per soal)
+                list_soal_kontur = []
+                for i in range(0, len(kontur_lingkaran), 5):
+                    sub_grup = kontur_lingkaran[i:i+5]
+                    if len(sub_grup) == 5:
+                        # Urutkan sub grup dari kiri ke kanan (A, B, C, D, E)
+                        sub_grup_boxes = [cv2.boundingRect(cg) for cg in sub_grup]
+                        sub_grup = [cg for _, cg in sorted(zip(sub_grup_boxes, sub_grup), key=lambda b: b[0][0])]
+                        list_soal_kontur.append(sub_grup)
+                
+                # Urutkan ulang baris soal berdasarkan struktur penomoran unik LJK Maslakul Huda Anda
+                # (Kiri Atas, Kiri Bawah, Tengah Atas, Tengah Bawah, Kanan Atas, Kanan Bawah)
+                def dapatkan_posisi_blok(grup):
+                    (x, y, w, h) = cv2.boundingRect(grup[0])
+                    return (x, y)
+                
+                list_soal_kontur = sorted(list_soal_kontur, key=dapatkan_posisi_blok)
+
+                # Batasi pemrosesan hanya sampai jumlah soal yang diaktifkan user
+                for q in range(min(total_soal_aktif, len(list_soal_kontur))):
+                    cnts_pilihan = list_soal_kontur[q]
                     
                     diarsir = None
                     for j, c in enumerate(cnts_pilihan):
@@ -159,38 +176,37 @@ with tab2:
                         cv2.drawContours(mask, [c], -1, 255, -1)
                         mask = cv2.bitwise_and(thresh, mask)
                         total = cv2.countNonZero(mask)
+                        
                         if diarsir is None or total > diarsir[0]:
                             diarsir = (total, j)
 
-                    # Ambil jawaban otomatis dari deteksi kamera
                     huruf_terdeteksi = ans_letters[diarsir[1]]
                     huruf_kunci = kunci_master_aktif.get(q, 'A')
 
                     if huruf_terdeteksi == huruf_kunci:
                         soal_benar += 1
                         skor_didapat += bobot_aktif
-                        warna = (0, 255, 0) # Hijau jika benar
-                        detail_jawaban.append(f"No. {q+1}:  (Siswa: {huruf_terdeteksi} | Kunci: {huruf_kunci})")
+                        warna = (0, 255, 0) # Hijau
+                        detail_jawaban.append(f"No. {q+1}: ✅ (Siswa: {huruf_terdeteksi} | Kunci: {huruf_kunci})")
                     else:
                         soal_salah += 1
-                        warna = (0, 0, 255) # Merah jika salah
+                        warna = (0, 0, 255) # Merah
                         detail_jawaban.append(f"No. {q+1}: ❌ (Siswa: {huruf_terdeteksi} | Kunci: {huruf_kunci})")
                         
                     cv2.drawContours(output, [cnts_pilihan[ans_letters.index(huruf_kunci)]], -1, warna, 3)
 
                 nilai_akhir = (skor_didapat / max_skor_aktif) * 100
-                status_koreksi = "BERHASIL OTOMATIS"
+                status_koreksi = "BERHASIL OTOMATIS (PRESISI)"
             else:
-                # Batas aman otomatis jika foto blur/plafon
                 soal_benar = 0
                 soal_salah = total_soal_aktif
                 nilai_akhir = 0.0
-                status_koreksi = f"GAGAL (Kamera mendeteksi {len(kontur_terstruktur)} bulatan dari target {target_bulatan})"
+                status_koreksi = f"MOHON PASIKAN KAMERA TEGAK LURUS (Hanya mendeteksi {len(kontur_lingkaran)} bulatan)"
 
-            st.success("✨ Selesai! Hasil analisis kamera langsung keluar di bawah:")
+            st.success("✨ Selesai! Hasil analisis presisi tinggi keluar di bawah:")
 
             # ==========================================
-            # PANEL RINGKASAN OUTPUT NILAI OTOMATIS
+            # PANEL RINGKASAN OUTPUT
             # ==========================================
             st.markdown(f"""
             ### 📋 LAPORAN HASIL PENILAIAN LJK
@@ -210,8 +226,7 @@ with tab2:
                 for line in detail_jawaban:
                     st.write(line)
 
-            # Tampilkan visualisasi deteksi bulatan
-            st.image(output, channels="BGR", caption="Visualisasi Hasil Koreksi Kamera")
+            st.image(output, channels="BGR", caption="Visualisasi Analisis Presisi LJK")
 
             st.markdown("---")
             
@@ -253,6 +268,6 @@ with tab2:
                             cursor: pointer;
                             text-align: center;">
                             🟢 KIRIM SEKARANG VIA WHATSAPP
-                        </button>
-                    </a>
-                ''', unsafe_allow_html=True)
+                    </button>
+                </a>
+            ''', unsafe_allow_html=True)
