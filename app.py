@@ -52,12 +52,10 @@ with tab1:
             idx = base_idx + sub_idx
             if idx < jumlah_soal:
                 with cols[sub_idx]:
-                    # Mengambil memory kunci sebelumnya agar tidak ter-reset
-                    default_idx = 1
                     pilihan = st.selectbox(
                         f"Soal {idx+1}", 
                         ['A', 'B', 'C', 'D', 'E'], 
-                        index=default_idx, 
+                        index=1, 
                         key=f"master_kunci_{idx}"
                     )
                     kunci_master_baru[idx] = pilihan
@@ -104,7 +102,7 @@ with tab2:
             image = cv2.imdecode(file_bytes, 1)
             output = image.copy()
             
-            # Algoritma Filter Pemrosesan Gambar Sukses yang Sebelumnya
+            # Algoritma Filter Pemrosesan Gambar
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             blurred = cv2.GaussianBlur(gray, (7, 7), 0)
             thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
@@ -129,7 +127,8 @@ with tab2:
             # Jika Gambar Berhasil Dibaca Sempurna Seperti Sampel Sukses Bapak
             if len(kontur_valid) >= min_bulatan_required:
                 boundingBoxes = [cv2.boundingRect(c) for c in kontur_valid]
-                kontur_valid = [c for _, c in sorted(zip(boundingBoxes, kontur_valid), key=lambda b: b[1][1])]
+                # PERBAIKAN DI SINI: Mengubah b[1][1] menjadi b[0][1] agar tidak memicu ValueError
+                kontur_valid = [c for _, c in sorted(zip(boundingBoxes, kontur_valid), key=lambda b: b[0][1])]
                 
                 list_soal_kontur = []
                 while len(kontur_valid) >= 5:
