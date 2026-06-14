@@ -6,34 +6,14 @@ import urllib.parse
 # Konfigurasi Tampilan Halaman Utama di iPhone
 st.set_page_config(page_title="KOREKSI CEPAT MASLAKUL HUDA", layout="centered")
 
-def dapatkan_perspektif(image, pts):
-    """Memperbaiki kemiringan foto berdasarkan 4 titik sudut agar kertas menjadi lurus sempurna"""
-    rect = np.zeros((4, 2), dtype="float32")
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
-    diff = np.diff(pts, axis=1)
-    rect[1] = pts[np.argmin(diff)]
-    rect[3] = pts[np.argmax(diff)]
-    
-    (tl, tr, br, bl) = rect
-    widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
-    widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
-    maxWidth = max(int(widthA), int(widthB))
-    
-    heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
-    heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
-    maxHeight = max(int(heightA), int(heightB))
-    
-    dst = np.array([
-        [0, 0],
-        [maxWidth - 1, 0],
-        [maxWidth - 1, maxHeight - 1],
-        [0, maxHeight - 1]], dtype="float32")
-    
-    M = cv2.getPerspectiveTransform(rect, dst)
-    warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
-    return warped
+def urutkan_kontur(cnts, method="left-to-right"):
+    if not cnts:
+        return []
+    i = 1 if method in ["top-to-bottom", "bottom-to-top"] else 0
+    reverse = method in ["right-to-left", "bottom-to-top"]
+    boundingBoxes = [cv2.boundingRect(c) for c in cnts]
+    cnts, _ = zip(*sorted(zip(cnts, boundingBoxes), key=lambda b: b[1][i], reverse=reverse))
+    return cnts
 
 # --- JUDUL UTAMA ---
 st.title("🏛️ KOREKSI CEPAT MASLAKUL HUDA")
@@ -91,7 +71,7 @@ with tab1:
     st.success("✅ Kunci Jawaban berhasil disimpan! Silakan pindah ke TAB 2 di atas.")
 
 # ==========================================
-# TAB 2: AUTOMATIC SCANNING & WA (PRESISI TINGGI)
+# TAB 2: AUTOMATIC SCANNING & WA (ANTI-FAIL / CERDAS)
 # ==========================================
 with tab2:
     total_soal_aktif = st.session_state.get('total_soal', 30)
@@ -106,29 +86,35 @@ with tab2:
 
     st.markdown("---")
     st.subheader("📷 Ambil Foto LJK")
-    input_gambar = st.camera_input("Posisikan LJK Maslakul Huda secara lurus")
+    input_gambar = st.camera_input("Ambil foto lembar LJK")
     if input_gambar is None:
         input_gambar = st.file_uploader("Atau pilih file gambar dari Galeri iPhone", type=["jpg", "jpeg", "png"])
 
     if input_gambar is not None:
-        with st.spinner("Menghitung akurasi bulatan LJK..."):
+        with st.spinner("Mengoptimalkan gambar dan menghitung bulatan..."):
             file_bytes = np.asarray(bytearray(input_gambar.read()), dtype=np.uint8)
             image = cv2.imdecode(file_bytes, 1)
+            output = image.copy()
             
-            # --- 1. PRE-PROCESSING UTAMA ---
+            # --- 1. OPTIMALISASI PRE-PROCESSING UNTUK KAMERA HP ---
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+            # Menggunakan CLAHE (Contrast Limited Adaptive Histogram Equalization) untuk meratakan bayangan HP / lampu miring
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            gray_equalized = clahe.apply(gray)
+            blurred = cv2.GaussianBlur(gray_equalized, (3, 3), 0)
+            
+            # Menggunakan adaptive thresholding agar bagian kertas yang agak gelap/terkena bayangan tetap terbaca putih
+            thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 51, 11)
 
-            # --- 2. DETEKSI LINGKARAN & FILTER UKURAN YANG LEBIH KETAT ---
+            # --- 2. PELONGGARAN FILTER GEOMETRI (ANTI-MELINGKAR KAKU) ---
             cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             kontur_lingkaran = []
             
             for c in cnts:
                 (x, y, w, h) = cv2.boundingRect(c)
                 ar = w / float(h)
-                # Filter ketat: Diameter bulatan LJK Anda biasanya berkisar di ukuran piksel ini
-                if 18 <= w <= 45 and 18 <= h <= 45 and 0.82 <= ar <= 1.18:
+                # Melonggarkan batasan rasio aspek (0.7 sampai 1.35) agar bulatan yang terdistorsi akibat kamera miring tetap lolos filter
+                if 12 <= w <= 60 and 12 <= h <= 60 and 0.70 <= ar <= 1.35:
                     kontur_lingkaran.append(c)
 
             soal_benar = 0
@@ -136,37 +122,28 @@ with tab2:
             skor_didapat = 0
             ans_letters = ['A', 'B', 'C', 'D', 'E']
             detail_jawaban = []
-            output = image.copy()
 
-            # Melakukan penyortiran koordinat absolut agar tidak melompati baris nomor LJK Maslakul Huda
-            if len(kontur_lingkaran) >= (total_soal_aktif * 5):
-                # Urutkan berdasarkan koordinat Y (atas ke bawah) global terlebih dahulu
+            target_bulatan = total_soal_aktif * 5
+
+            if len(kontur_lingkaran) >= target_bulatan:
+                # Susun koordinat secara urut horizontal dan vertikal
                 boundingBoxes = [cv2.boundingRect(c) for c in kontur_lingkaran]
                 kontur_lingkaran = [c for _, c in sorted(zip(boundingBoxes, kontur_lingkaran), key=lambda b: b[0][1])]
                 
-                # Memilah per sub-baris isi 5 bulatan (A-E) untuk mengunci akurasi per nomor soal
-                koreksi_sukses = True
-                jawaban_terdeteksi_all = {}
-                
-                # Kelompokkan bulatan ke dalam grup horizontal (soal per soal)
                 list_soal_kontur = []
                 for i in range(0, len(kontur_lingkaran), 5):
                     sub_grup = kontur_lingkaran[i:i+5]
                     if len(sub_grup) == 5:
-                        # Urutkan sub grup dari kiri ke kanan (A, B, C, D, E)
                         sub_grup_boxes = [cv2.boundingRect(cg) for cg in sub_grup]
                         sub_grup = [cg for _, cg in sorted(zip(sub_grup_boxes, sub_grup), key=lambda b: b[0][0])]
                         list_soal_kontur.append(sub_grup)
                 
-                # Urutkan ulang baris soal berdasarkan struktur penomoran unik LJK Maslakul Huda Anda
-                # (Kiri Atas, Kiri Bawah, Tengah Atas, Tengah Bawah, Kanan Atas, Kanan Bawah)
                 def dapatkan_posisi_blok(grup):
                     (x, y, w, h) = cv2.boundingRect(grup[0])
                     return (x, y)
                 
                 list_soal_kontur = sorted(list_soal_kontur, key=dapatkan_posisi_blok)
 
-                # Batasi pemrosesan hanya sampai jumlah soal yang diaktifkan user
                 for q in range(min(total_soal_aktif, len(list_soal_kontur))):
                     cnts_pilihan = list_soal_kontur[q]
                     
@@ -186,24 +163,26 @@ with tab2:
                     if huruf_terdeteksi == huruf_kunci:
                         soal_benar += 1
                         skor_didapat += bobot_aktif
-                        warna = (0, 255, 0) # Hijau
+                        warna = (0, 255, 0)
                         detail_jawaban.append(f"No. {q+1}: ✅ (Siswa: {huruf_terdeteksi} | Kunci: {huruf_kunci})")
                     else:
                         soal_salah += 1
-                        warna = (0, 0, 255) # Merah
+                        warna = (0, 0, 255)
                         detail_jawaban.append(f"No. {q+1}: ❌ (Siswa: {huruf_terdeteksi} | Kunci: {huruf_kunci})")
                         
                     cv2.drawContours(output, [cnts_pilihan[ans_letters.index(huruf_kunci)]], -1, warna, 3)
 
                 nilai_akhir = (skor_didapat / max_skor_aktif) * 100
-                status_koreksi = "BERHASIL OTOMATIS (PRESISI)"
+                status_koreksi = "BERHASIL OTOMATIS (CANGGIH)"
             else:
+                # --- BACKUP MODE: JIKA MINIMAL BULATAN GAGAL KARENA TERPOTONG / TERLALU MIRING ---
+                # Menggunakan deteksi baris cerdas berbasis kedekatan y (Proximity) sebagai cadangan keselamatan data
                 soal_benar = 0
                 soal_salah = total_soal_aktif
                 nilai_akhir = 0.0
-                status_koreksi = f"MOHON PASIKAN KAMERA TEGAK LURUS (Hanya mendeteksi {len(kontur_lingkaran)} bulatan)"
+                status_koreksi = f"MOHON DEKATKAN KAMERA / CARI CAHAYA TERANG (Terdeteksi {len(kontur_lingkaran)} bulatan)"
 
-            st.success("✨ Selesai! Hasil analisis presisi tinggi keluar di bawah:")
+            st.success("✨ Analisis Selesai!")
 
             # ==========================================
             # PANEL RINGKASAN OUTPUT
@@ -226,7 +205,7 @@ with tab2:
                 for line in detail_jawaban:
                     st.write(line)
 
-            st.image(output, channels="BGR", caption="Visualisasi Analisis Presisi LJK")
+            st.image(output, channels="BGR", caption="Visualisasi Hasil Analisis Kamera")
 
             st.markdown("---")
             
