@@ -1,61 +1,79 @@
 import streamlit as st
 import cv2
 import numpy as np
+from PIL import Image
+from streamlit_image_cropper import st_cropper
 
-st.set_page_config(page_title="Koreksi LJK Presisi", layout="wide")
+st.set_page_config(page_title="Koreksi LJK Interaktif", layout="centered")
 
-st.title("📸 Pemindai LJK dengan Garis Pembatas Pas")
-st.write("Sesuaikan 4 titik koordinat pojok agar garis merah pas membungkus 4 kotak hijau di LJK Anda.")
+st.title("📸 Pemindai LJK - Geser Pembatas Kertas")
+st.write("Geser dan tarik kotak pembatas di bawah menggunakan jari Anda hingga pas membungkus area lembar jawaban LJK.")
 
-# --- INISIALISASI ATAU AMBIL FILE ---
-uploaded_file = st.file_uploader("Unggah Foto LJK Anda...", type=["png", "jpg", "jpeg"])
+# 1. UPLOAD GAMBAR
+uploaded_file = st.file_uploader("Unggah atau Ambil Foto LJK...", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img_raw = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    # Buka gambar menggunakan PIL untuk dialirkan ke komponen Cropper
+    img_pil = Image.open(uploaded_file)
     
-    # Standarkan resolusi awal gambar input agar pas di layar HP
-    h_orig, w_orig = img_raw.shape[:2]
-    scale_view = 800 / h_orig
-    img = cv2.resize(img_raw, (int(w_orig * scale_view), 800))
-    h, w, _ = img.shape
-
-    # --- MENU KONTROL PENGGESER TITIK POJOK ---
-    st.sidebar.header("📍 Geser Posisi 4 Titik Pojok")
-    st.sidebar.write("Ubah angka di bawah ini untuk mengepaskan lingkaran merah ke kotak hijau LJK Anda:")
+    st.subheader("📐 Langkah 1: Geser & Sesuaikan Kotak Pembatas")
+    st.info("Tarik ujung-ujung kotak di bawah ini agar pas mengurung kertas LJK Anda, lalu lihat hasilnya di bawah.")
     
-    # Estimasi posisi awal di sudut-sudut gambar
-    x_tl = st.sidebar.number_input("Kiri Atas (X)", min_value=0, max_value=w, value=int(w * 0.1))
-    y_tl = st.sidebar.number_input("Kiri Atas (Y)", min_value=0, max_value=h, value=int(h * 0.1))
+    # Menampilkan fungsi CROPPER INTERAKTIF (Bisa digeser/tarik langsung di HP)
+    # Box_color adalah warna garis pembatas (kita pakai merah agar jelas)
+    cropped_img_pil = st_cropper(
+        img_pil, 
+        realtime_update=True, 
+        box_color='#FF0000', 
+        aspect_ratio=None
+    )
     
-    x_tr = st.sidebar.number_input("Kanan Atas (X)", min_value=0, max_value=w, value=int(w * 0.9))
-    y_tr = st.sidebar.number_input("Kanan Atas (Y)", min_value=0, max_value=h, value=int(h * 0.1))
+    # 2. PROSES PERSPECTIVE & GRID MATEMATIS OTOMATIS
+    # Mengubah hasil potongan gambar interaktif tadi ke format OpenCV
+    img_cropped = cv2.cvtColor(np.array(cropped_img_pil), cv2.COLOR_RGB2BGR)
     
-    x_br = st.sidebar.number_input("Kanan Bawah (X)", min_value=0, max_value=w, value=int(w * 0.9))
-    y_br = st.sidebar.number_input("Kanan Bawah (Y)", min_value=0, max_value=h, value=int(h * 0.9))
-    
-    x_bl = st.sidebar.number_input("Kiri Bawah (X)", min_value=0, max_value=w, value=int(w * 0.1))
-    y_bl = st.sidebar.number_input("Kiri Bawah (Y)", min_value=0, max_value=h, value=int(h * 0.9))
-
-    # Tampilkan garis pembatas pembungkus pada gambar asli
-    img_pembantas = img.copy()
-    pts_pembatas = np.array([[x_tl, y_tl], [x_tr, y_tr], [x_br, y_br], [x_bl, y_bl]], np.int32)
-    # Gambar garis merah tebal penghubung antar titik
-    cv2.polylines(img_pembantas, [pts_pembatas], True, (0, 0, 255), 3)
-    # Gambar lingkaran penanda di setiap sudut
-    for pt in pts_pembatas:
-        cv2.circle(img_pembantas, tuple(pt), 8, (255, 0, 0), -1)
-
-    # --- PROSES PELURUSAN PERSPEKTIF ---
-    pts1 = np.float32([[x_tl, y_tl], [x_tr, y_tr], [x_br, y_br], [x_bl, y_bl]])
-    width_w, height_w = 600, 850
-    pts2 = np.float32([[0, 0], [width_w, 0], [width_w, height_w], [0, height_w]])
-    
-    M_matrix = cv2.getPerspectiveTransform(pts1, pts2)
-    warped = cv2.warpPerspective(img, M_matrix, (width_w, height_w))
+    # Paksa hasil potongan menjadi resolusi standar presisi tinggi (600 x 850 piksel)
+    width, height = 600, 850
+    warped = cv2.resize(img_cropped, (width, height))
     output_display = warped.copy()
-
-    # --- GRID MATEMATIS LAYOUT LJK (Nomor 1-50) ---
-    # Fungsi ini menggambar bulatan tepat di atas kertas yang sudah diluruskan garis pembatas tadi
+    
+    # 3. KISI MATEMATIS UTALISASI BULATAN (Pasti Pas jika pemotongan kertas rapi)
     def buat_grid_tetap():
-        map_soal
+        map_soal = {}
+        j_opsi, j_baris = 18, 21
+        
+        # Blok Atas (Soal 11-20 dan 31-40)
+        for i in range(10):
+            map_soal[11 + i] = [(240 + (j * j_opsi), 115 + (i * j_baris)) for j in range(5)]
+            map_soal[31 + i] = [(395 + (j * j_opsi), 115 + (i * j_baris)) for j in range(5)]
+        # Blok Bawah (Soal 1-10, 21-30, 41-50)
+        for i in range(10):
+            map_soal[1 + i] = [(112 + (j * j_opsi), 433 + (i * j_baris)) for j in range(5)]
+            map_soal[21 + i] = [(242 + (j * j_opsi), 433 + (i * j_baris)) for j in range(5)]
+            map_soal[41 + i] = [(397 + (j * j_opsi), 433 + (i * j_baris)) for j in range(5)]
+        return map_soal
+
+    grid_ljk = buat_grid_tetap()
+    
+    # Gambar seleksi bulatan hijau nomor 1-50
+    for q_num, opsi_list in grid_ljk.items():
+        x_lbl, y_lbl = opsi_list[0]
+        # Gambar nomor soal warna merah kecil
+        cv2.putText(output_display, f"{q_num}", (x_lbl - 22, y_lbl + 5), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
+        
+        for (cx, cy) in opsi_list:
+            # Menggambar bulatan hijau seleksi pilihan ganda
+            cv2.circle(output_display, (cx, cy), 8, (0, 255, 0), 1)
+            cv2.circle(output_display, (cx, cy), 1, (0, 0, 255), -1)
+
+    # 4. TAMPILKAN HASILNYA DI BAWAHNYA SECARA REAL-TIME
+    st.markdown("---")
+    st.subheader("🎯 Langkah 2: Hasil Seleksi Otomatis Nomor 1-50")
+    st.write("Jika bulatan hijau belum pas, silakan sesuaikan kembali kotak pembatas merah di atas.")
+    
+    st.image(
+        cv2.cvtColor(output_display, cv2.COLOR_BGR2RGB), 
+        caption="Hasil Seleksi Bulatan Pasca Pemotongan", 
+        use_container_width=True
+    )
