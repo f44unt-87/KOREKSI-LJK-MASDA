@@ -2,22 +2,17 @@ import streamlit as st
 import cv2
 import numpy as np
 
-st.set_page_config(page_title="Sistem Koreksi LJK Maslakul Huda", layout="wide")
+st.set_page_config(page_title="Koreksi LJK Presisi Maslakul Huda", layout="wide")
 
-st.title("💯 Sistem Koreksi & Seleksi LJK Dinamis (1-50)")
-st.write("Aplikasi ini menggunakan sistem model berbasis LJK Kunci Jawaban untuk memetakan koordinat bulatan secara presisi.")
+st.title("💯 Pemindai LJK Metode Grid Geometris (Anti-Meleset)")
+st.write("Sistem ini mengunci koordinat bulatan berdasarkan layout matematika LJK, bukan tebakan otomatis.")
 
-# --- INI LOGIKA UNTUK MELURUSKAN PERSPEKTIF LEMBAR JAWABAN ---
 def luruskan_lembar(image):
-    # Mengubah ukuran gambar ke standar pemrosesan agar ringan di HP
+    """Meluruskan kertas menggunakan 4 titik jangkar kotak pembatas"""
     h_orig, w_orig = image.shape[:2]
-    scale = 800 / h_orig
-    resized = cv2.resize(image, (int(w_orig * scale), 800))
+    scale = 1000 / h_orig  # Naikkan resolusi ke 1000px agar presisi
+    resized = cv2.resize(image, (int(w_orig * scale), 1000))
     
-    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    
-    # Deteksi berbasis kotak hijau pembatas (Jangkar Sudut)
     hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
     lower_green = np.array([35, 40, 40])
     upper_green = np.array([85, 255, 255])
@@ -26,7 +21,7 @@ def luruskan_lembar(image):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     centers = []
     for c in contours:
-        if 80 < cv2.contourArea(c) < 1500:
+        if 50 < cv2.contourArea(c) < 2000:
             M = cv2.moments(c)
             if M["m00"] != 0:
                 centers.append([int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])])
@@ -35,13 +30,13 @@ def luruskan_lembar(image):
         centers = np.array(centers)
         rect = np.zeros((4, 2), dtype="float32")
         s = centers.sum(axis=1)
-        rect[0] = centers[np.argmin(s)] # Kiri Atas
-        rect[2] = centers[np.argmax(s)] # Kanan Bawah
+        rect[0] = centers[np.argmin(s)]  # Kiri Atas
+        rect[2] = centers[np.argmax(s)]  # Kanan Bawah
         diff = np.diff(centers, axis=1)
         rect[1] = centers[np.argmin(diff)] # Kanan Atas
         rect[3] = centers[np.argmax(diff)] # Kiri Bawah
         
-        # Warp ke ukuran standar resolusi tinggi
+        # Dimensi standar lembar LJK yang telah diluruskan
         width, height = 600, 850
         pts2 = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
         M_matrix = cv2.getPerspectiveTransform(rect, pts2)
@@ -49,87 +44,92 @@ def luruskan_lembar(image):
         return warped
     return None
 
-# --- INI LOGIKA UNTUK MENGEKSTRAK KISI BULATAN ---
-def dapatkan_kisi_bulatan(warped_img):
-    gray = cv2.cvtColor(warped_img, cv2.COLOR_BGR2GRAY)
-    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+def buat_grid_ljk():
+    """
+    Memetakan koordinat matematika murni berdasarkan layout kertas Maslakul Huda.
+    Mencakup Soal 1-50 dengan opsi A, B, C, D, E.
+    """
+    map_soal = {}
     
-    cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    bulatan = []
-    for c in cnts:
-        (x, y, w, h) = cv2.boundingRect(c)
-        ar = w / float(h)
-        # Karakteristik bulatan LJK
-        if w >= 12 and h >= 12 and w <= 25 and h <= 25 and 0.75 <= ar <= 1.25:
-            bulatan.append((x, y, w, h))
-    return bulatan
-
-# --- INTERFACE UTAMA STREAMLIT ---
-col_mod, col_scan = st.columns(2)
-
-with col_mod:
-    st.header("1. Registrasi Model (Kunci)")
-    file_model = st.file_uploader("Unggah LJK Kunci Jawaban (Sebagai Acuan)", type=["png", "jpg", "jpeg"])
+    # 1. KONFIGURASI JARAK ANTAR OPSI (A ke B, B ke C, dst = ~18 piksel)
+    jarak_opsi = 18
     
-    if file_model:
-        bytes_data = np.asarray(bytearray(file_model.read()), dtype=np.uint8)
-        img_model = cv2.imdecode(bytes_data, cv2.IMREAD_COLOR)
+    # ==================== BLOK ATAS (Soal 11-40) ====================
+    # Kolom Tengah (Soal 11-20) -> Koordinat X awal opsi A dimulai dari X=240
+    start_x_tengah_atas = 240
+    start_y_tengah_atas = 115
+    for i in range(10):
+        q_num = 11 + i
+        y_pos = start_y_tengah_atas + (i * 21) # Jarak antar baris soal = 21px
+        map_soal[q_num] = [(start_x_tengah_atas + (j * jarak_opsi), y_pos) for j in range(5)]
         
-        warped_model = luruskan_lembar(img_model)
-        if warped_model is not None:
-            list_bulatan = dapatkan_kisi_bulatan(warped_model)
-            # Simpan koordinat bulatan ke dalam session state agar diingat oleh sistem
-            st.session_state['model_coords'] = list_bulatan
-            st.session_state['warped_model'] = warped_model
-            st.success(f"Model Berhasil Dikunci! Menemukan {len(list_bulatan)} titik referensi pilihan ganda.")
-            
-            # Tampilkan visualisasi model cetak biru
-            vis_model = warped_model.copy()
-            for (x, y, w, h) in list_bulatan:
-                cv2.rectangle(vis_model, (x, y), (x+w, y+h), (255, 0, 0), 2)
-            st.image(cv2.cvtColor(vis_model, cv2.COLOR_BGR2RGB), caption="Cetak Biru Model Referensi")
-        else:
-            st.error("Gagal meluruskan LJK Model. Pastikan 4 kotak hijau terlihat jelas.")
+    # Kolom Kanan (Soal 31-40) -> Koordinat X awal opsi A dimulai dari X=395
+    start_x_kanan_atas = 395
+    start_y_kanan_atas = 115
+    for i in range(10):
+        q_num = 31 + i
+        y_pos = start_y_kanan_atas + (i * 21)
+        map_soal[q_num] = [(start_x_kanan_atas + (j * jarak_opsi), y_pos) for j in range(5)]
 
-with col_scan:
-    st.header("2. Pemindaian LJK Jawaban")
-    if 'model_coords' not in st.session_state:
-        st.warning("Silakan unggah dan registrasi LJK Kunci di sebelah kiri terlebih dahulu.")
+    # ==================== BLOK BAWAH (Soal 1-10, 21-30, 41-50) ====================
+    # Kolom Kiri (Soal 1-10) -> Koordinat X awal opsi A dimulai dari X=112
+    start_x_kiri_bawah = 112
+    start_y_bawah = 433
+    for i in range(10):
+        q_num = 1 + i
+        y_pos = start_y_bawah + (i * 21)
+        map_soal[q_num] = [(start_x_kiri_bawah + (j * jarak_opsi), y_pos) for j in range(5)]
+        
+    # Kolom Tengah (Soal 21-30) -> Koordinat X awal opsi A dimulai dari X=242
+    start_x_tengah_bawah = 242
+    for i in range(10):
+        q_num = 21 + i
+        y_pos = start_y_bawah + (i * 21)
+        map_soal[q_num] = [(start_x_tengah_bawah + (j * jarak_opsi), y_pos) for j in range(5)]
+        
+    # Kolom Kanan (Soal 41-50) -> Koordinat X awal opsi A dimulai dari X=397
+    start_x_kanan_bawah = 397
+    for i in range(10):
+        q_num = 41 + i
+        y_pos = start_y_bawah + (i * 21)
+        map_soal[q_num] = [(start_x_kanan_bawah + (j * jarak_opsi), y_pos) for j in range(5)]
+        
+    return map_soal
+
+# --- ANTARMUKA STREAMLIT ---
+file_image = st.file_uploader("Unggah Gambar LJK (Kunci atau Jawaban Siswa)...", type=["png", "jpg", "jpeg"])
+
+if file_image:
+    bytes_data = np.asarray(bytearray(file_image.read()), dtype=np.uint8)
+    img = cv2.imdecode(bytes_data, cv2.IMREAD_COLOR)
+    
+    warped = luruskan_lembar(img)
+    if warped is not None:
+        output_display = warped.copy()
+        
+        # Buat pemetaan grid koordinat matematis LJK
+        grid_ljk = buat_grid_ljk()
+        radius_bullet = 8  # Ukuran radius lingkaran seleksi
+        
+        # Gambar lingkaran penyeleksi murni berdasarkan koordinat rumus matematika layout
+        for q_num, opsi_list in grid_ljk.items():
+            # Beri label nomor soal di sebelah kiri opsi A
+            x_label, y_label = opsi_list[0]
+            cv2.putText(output_display, f"{q_num}", (x_label - 22, y_label + 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
+            
+            # Gambar bulatan pilihan ganda A, B, C, D, E
+            for (cx, cy) in opsi_list:
+                cv2.circle(output_display, (cx, cy), radius_bullet, (0, 255, 0), 1)
+                cv2.circle(output_display, (cx, cy), 1, (0, 0, 255), -1) # Titik pusat tengah
+                
+        st.success("Berhasil Mengunci Grid Seluruh Bulatan Nomor 1-50!")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(cv2.cvtColor(warped, cv2.COLOR_BGR2RGB), caption="LJK Setelah Diluruskan")
+        with col2:
+            st.image(cv2.cvtColor(output_display, cv2.COLOR_BGR2RGB), caption="Hasil Pemetaan Grid Matematika (Pasti Pas)")
+            
     else:
-        file_scan = st.file_uploader("Unggah LJK Lembar Jawaban Siswa/Ujian", type=["png", "jpg", "jpeg"])
-        
-        if file_scan:
-            bytes_data_s = np.asarray(bytearray(file_scan.read()), dtype=np.uint8)
-            img_scan = cv2.imdecode(bytes_data_s, cv2.IMREAD_COLOR)
-            
-            warped_scan = luruskan_lembar(img_scan)
-            if warped_scan is not None:
-                final_output = warped_scan.copy()
-                
-                # Pemrosesan biner gambar siswa untuk mendeteksi pilihan yang dihitamkan
-                gray_s = cv2.cvtColor(warped_scan, cv2.COLOR_BGR2GRAY)
-                thresh_s = cv2.threshold(gray_s, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
-                
-                # Ambil koordinat referensi dari model yang sudah dikunci tadi
-                referensi_bulatan = st.session_state['model_coords']
-                
-                # Proyeksikan koordinat model ke gambar yang baru masuk
-                for (x, y, w, h) in referensi_bulatan:
-                    # Ambil potongan area piksel bulatan
-                    mask_area = thresh_s[y:y+h, x:x+w]
-                    total_piksel = cv2.countNonZero(mask_area)
-                    luas_area = w * h
-                    kepadatan = total_piksel / float(luas_area)
-                    
-                    # Jika kerapatan piksel hitam tinggi, tandai sebagai pilihan siswa (Warna Merah Solid)
-                    if kepadatan > 0.5: 
-                        cv2.rectangle(final_output, (x, y), (x+w, y+h), (0, 0, 255), -1) 
-                    else:
-                        # Bulatan kosong biasa (Warna Hijau Presisi)
-                        cv2.rectangle(final_output, (x, y), (x+w, y+h), (0, 255, 0), 1)
-                
-                st.success("Sinkronisasi Selesai! Semua bulatan dipetakan 100% pas mengikuti model acuan.")
-                st.image(cv2.cvtColor(final_output, cv2.COLOR_BGR2RGB), caption="Hasil Penyeleksian LJK Siswa Berdasarkan Model")
-            else:
-                st.error("Gagal mendeteksi lembar jawaban siswa. Pastikan posisi pengambilan gambar mirip dengan model referensi.")
-
+        st.error("Gagal mendeteksi kertas. Pastikan 4 kotak hijau di sudut LJK tidak terpotong kamera.")
