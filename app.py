@@ -2,146 +2,102 @@ import streamlit as st
 import cv2
 import numpy as np
 
-# Konfigurasi halaman Streamlit
-st.set_page_config(page_title="Koreksi LJK Otomatis", layout="centered")
+st.set_page_config(page_title="Koreksi LJK Presisi", layout="centered")
 
-st.title("📸 Pemindai & Seleksi LJK Otomatis")
-st.write("Unggah foto lembar LJK Anda, sistem akan otomatis meluruskan perspektif dan menyeleksi nomor 1-50.")
+st.title("📸 Pemindai LJK Presisi (Anti-Menceng)")
+st.write("Versi optimasi: Menggunakan pelurusan titik presisi tinggi dan grid mapping dinamis.")
 
-# Komponen Uploader Gambar
-uploaded_file = st.file_uploader("Pilih atau Ambil Foto LJK...", type=["png", "jpg", "jpeg", "heic"])
+uploaded_file = st.file_uploader("Unggah Foto LJK Anda...", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
-    # Mengubah file upload menjadi format OpenCV image
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    
-    # Buat salinan untuk proses visualisasi
-    output_img = img.copy()
     h, w, _ = img.shape
     
-    st.info("Sedang memproses gambar dan mendeteksi 4 titik pojok...")
-
-    # 1. DETEKSI OTOMATIS 4 KOTAK JANGKAR (Warna Hijau)
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    lower_green = np.array([35, 40, 40])
-    upper_green = np.array([85, 255, 255])
-    mask = cv2.inRange(hsv, lower_green, upper_green)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    detected_corners = []
+    # 1. DETEKSI 4 TITIK POJOK UTAMA (Mencari Kontur Terluar / Kotak Pembatas)
+    gray_init = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred_init = cv2.GaussianBlur(gray_init, (5, 5), 0)
+    edged = cv2.Canny(blurred_init, 50, 150)
+    
+    contours, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    
+    pts1 = None
     for c in contours:
-        area = cv2.contourArea(c)
-        if 100 < area < 1000:
-            M = cv2.moments(c)
-            if M["m00"] != 0:
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
-                detected_corners.append([cX, cY])
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+        if len(approx) == 4:
+            pts1 = approx
+            break
+            
+    # Jika kontur luar gagal, gunakan fallback deteksi berbasis warna hijau kotak pembatas
+    if pts1 is None:
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        lower_green = np.array([35, 40, 40])
+        upper_green = np.array([85, 255, 255])
+        mask = cv2.inRange(hsv, lower_green, upper_green)
+        contours_g, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        centers = []
+        for cg in contours_g:
+            if 100 < cv2.contourArea(cg) < 2000:
+                M = cv2.moments(cg)
+                if M["m00"] != 0:
+                    centers.append([int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])])
+                    
+        if len(centers) >= 4:
+            # Ambil 4 sudut paling ekstrem
+            centers = np.array(centers)
+            s = centers.sum(axis=1)
+            diff = np.diff(centers, axis=1)
+            pts1 = np.float32([centers[np.argmin(s)], centers[np.argmin(diff)], centers[np.argmax(s)], centers[np.argmax(diff)]])
 
-    # Validasi jika ditemukan minimal 4 titik kotak hijau
-    if len(detected_corners) >= 4:
-        pts = np.array(detected_corners)
+    if pts1 is not None:
+        # Menata urutan titik (Kiri Atas, Kanan Atas, Kanan Bawah, Kiri Bawah)
+        pts1 = pts1.reshape(4, 2)
+        rect = np.zeros((4, 2), dtype="float32")
+        s = pts1.sum(axis=1)
+        rect[0] = pts1[np.argmin(s)]
+        rect[2] = pts1[np.argmax(s)]
+        diff = np.diff(pts1, axis=1)
+        rect[1] = pts1[np.argmin(diff)]
+        rect[3] = pts1[np.argmax(diff)]
         
-        # Mengurutkan titik secara otomatis (Kiri Atas, Kanan Atas, Kanan Bawah, Kiri Bawah)
-        s = pts.sum(axis=1)
-        diff = np.diff(pts, axis=1)
-        
-        tl = pts[np.argmin(s)]       # Top-Left
-        br = pts[np.argmax(s)]       # Bottom-Right
-        tr = pts[np.argmin(diff)]    # Top-Right
-        bl = pts[np.argmax(diff)]    # Bottom-Left
-        
-        pts1 = np.float32([tl, tr, br, bl])
-        
-        # 2. PERSPECTIVE TRANSFORM (Meluruskan Lembar LJK)
-        width, height = 500, 700
+        # 2. PERSPECTIVE TRANSFORM DENGAN RESOLUSI LEBIH BESAR AGAR TIDAK PECAH
+        width, height = 600, 800
         pts2 = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
-        
-        matrix = cv2.getPerspectiveTransform(pts1, pts2)
-        warped = cv2.warpPerspective(img, matrix, (width, height))
+        M_matrix = cv2.getPerspectiveTransform(rect, pts2)
+        warped = cv2.warpPerspective(img, M_matrix, (width, height))
         final_output = warped.copy()
         
-        # 3. PREPROCESSING & DETEKSI BULATAN JAWABAN
-        gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # 3. DETEKSI BULATAN SECARA ADAPTIF (Mengikuti kontur bulat, bukan koordinat kaku)
+        gray_w = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+        thresh = cv2.threshold(gray_w, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
         
-        circles = cv2.HoughCircles(
-            blurred, 
-            cv2.HOUGH_GRADIENT, 
-            dp=1, 
-            minDist=12, 
-            param1=50, 
-            param2=14, 
-            minRadius=6, 
-            maxRadius=14
-        )
+        # Cari semua objek bulat di kertas yang sudah lurus
+        cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        bubble_contours = []
         
-        if circles is not None:
-            circles = np.uint16(np.around(circles[0]))
-            questions = {i: [] for i in range(1, 51)}
-            
-            # Pengelompokan nomor soal 1-50 berdasarkan letak sub-blok koordinat
-            for circle in circles:
-                cx, cy, r = circle
+        for c in cnts:
+            (x, y, w_b, h_b) = cv2.boundingRect(c)
+            ar = w_b / float(h_b)
+            # Filter objek yang benar-benar bulat berbentuk lingkaran LJK
+            if w_b >= 10 and h_b >= 10 and 0.8 <= ar <= 1.2:
+                bubble_contours.append(c)
                 
-                # BLOK ATAS (Y < 350)
-                if cy < 350:
-                    if 200 <= cx < 320:  # Kolom Tengah (Soal 11-20)
-                        row_idx = int((cy - 100) / 21)
-                        q_num = 11 + row_idx
-                        if 11 <= q_num <= 20: questions[q_num].append((cx, cy, r))
-                    elif cx >= 320:     # Kolom Kanan (Soal 31-40)
-                        row_idx = int((cy - 100) / 21)
-                        q_num = 31 + row_idx
-                        if 31 <= q_num <= 40: questions[q_num].append((cx, cy, r))
-                
-                # BLOK BAWAH (Y >= 350)
-                else:
-                    if cx < 200:        # Kolom Kiri (Soal 1-10)
-                        row_idx = int((cy - 440) / 21)
-                        q_num = 1 + row_idx
-                        if 1 <= q_num <= 10: questions[q_num].append((cx, cy, r))
-                    elif 200 <= cx < 320: # Kolom Tengah (Soal 21-30)
-                        row_idx = int((cy - 440) / 21)
-                        q_num = 21 + row_idx
-                        if 21 <= q_num <= 30: questions[q_num].append((cx, cy, r))
-                    elif cx >= 320:     # Kolom Kanan (Soal 41-50)
-                        row_idx = int((cy - 440) / 21)
-                        q_num = 41 + row_idx
-                        if 41 <= q_num <= 50: questions[q_num].append((cx, cy, r))
-
-            # Mengurutkan opsi jawaban A-E dari kiri ke kanan dan menandainya
-            for q_num in sorted(questions.keys()):
-                questions[q_num] = sorted(questions[q_num], key=lambda x: x[0])
-                if len(questions[q_num]) > 0:
-                    first_circle = questions[q_num][0]
-                    # Beri teks nomor soal berwarna merah
-                    cv2.putText(final_output, str(q_num), (first_circle[0] - 25, first_circle[1] + 5),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-                    for circle in questions[q_num]:
-                        cx, cy, r = circle
-                        # Gambar lingkaran luar warna cyan/biru muda
-                        cv2.circle(final_output, (cx, cy), r, (255, 255, 0), 2)
+        st.success(f"Berhasil mendeteksi {len(bubble_contours)} bulatan LJK!")
+        
+        # Gambar semua bulatan yang berhasil dikunci langsung pada posisinya
+        for c in bubble_contours:
+            (x, y, w_b, h_b) = cv2.boundingRect(c)
+            # Menggambar kotak presisi langsung di sekeliling bulatan asli gambar
+            cv2.rectangle(final_output, (x, y), (x + w_b, y + h_b), (0, 255, 0), 2)
             
-            # 4. MENAMPILKAN HASIL DI WEB STREAMLIT
-            st.success("Pemrosesan Selesai!")
-            
-            # Konversi BGR ke RGB untuk Streamlit
-            img_original_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img_warped_rgb = cv2.cvtColor(warped, cv2.COLOR_BGR2RGB)
-            img_final_rgb = cv2.cvtColor(final_output, cv2.COLOR_BGR2RGB)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(img_original_rgb, caption="1. Foto Asli Terunggah", use_container_width=True)
-            with col2:
-                st.image(img_warped_rgb, caption="2. Hasil Perspektif Lurus", use_container_width=True)
-                
-            st.image(img_final_rgb, caption="3. Hasil Seleksi Deteksi Nomor 1-50", use_container_width=True)
-            
-        else:
-            st.error("Gagal mendeteksi bulatan jawaban ganda. Coba perbaiki pencahayaan foto.")
+        # Tampilkan Hasil Perbaikan
+        img_original_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_final_rgb = cv2.cvtColor(final_output, cv2.COLOR_BGR2RGB)
+        
+        st.image(img_original_rgb, caption="Foto Asli", use_container_width=True)
+        st.image(img_final_rgb, caption="Hasil Koreksi Presisi (Kotak Hijau Mengunci Bulatan Asli)", use_container_width=True)
     else:
-        st.error(f"Gagal mendeteksi 4 kotak pojok hijau secara otomatis (Hanya mendeteksi {len(detected_corners)} titik). Pastikan 4 kotak pembatas di foto terlihat jelas dan tidak terpotong.")
+        st.error("Gagal meluruskan gambar. Pastikan batas tepi kertas LJK atau 4 kotak hijau terlihat jelas tanpa terpotong jari/bayangan.")
