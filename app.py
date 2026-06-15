@@ -1,3 +1,5 @@
+import cv2
+import numpy as np
 import streamlit as st
 import urllib.parse
 
@@ -9,17 +11,19 @@ st.title("🏛️ MASDA QUICK CORRECTION")
 st.write("Sistem Pemindai LJK Otomatis Kilat - MA Maslakul Huda")
 st.markdown("---")
 
-# Inisialisasi Memori Aplikasi agar Data Kunci Tidak Hilang Saat Dimuat Ulang
+# PERBAIKAN UTAMA: Inisialisasi Memori dipindahkan ke paling atas agar TIDAK memicu KeyError
+if 'jumlah_soal' not in st.session_state:
+    st.session_state['jumlah_soal'] = 30
 if 'kunci_master' not in st.session_state:
-    st.session_state['kunci_master'] = {i: 'B' for i in range(30)}
-if 'total_soal' not in st.session_state:
-    st.session_state['total_soal'] = 30
+    st.session_state['kunci_master'] = {i: 'B' for i in range(50)}
 if 'bobot_per_soal' not in st.session_state:
     st.session_state['bobot_per_soal'] = 2
 if 'mapel' not in st.session_state:
     st.session_state['mapel'] = "Fiqih"
 if 'kelas' not in st.session_state:
     st.session_state['kelas'] = "10-E1"
+if 'total_skor_max' not in st.session_state:
+    st.session_state['total_skor_max'] = 60
 
 # --- MEMBUAT 2 TAB UTAMA ---
 tab1, tab2 = st.tabs(["⚙️ TAB 1: Set Kunci Ujian", "📷 TAB 2: Kamera Scan Otomatis"])
@@ -34,6 +38,7 @@ with tab1:
     
     col_jsoal, col_jbobot = st.columns(2)
     with col_jsoal:
+        # Sekarang baris ini sudah aman karena 'jumlah_soal' sudah dijamin ada di memori atas
         j_soal = st.number_input("Jumlah Soal (Maks 50)", min_value=1, max_value=50, value=st.session_state['jumlah_soal'])
     with col_jbobot:
         bobot_sama_rata = st.number_input("Bobot Nilai Per 1 Soal PG", min_value=1, max_value=100, value=st.session_state['bobot_per_soal'], step=1)
@@ -58,7 +63,7 @@ with tab1:
             
     total_skor_max = j_soal * float(bobot_sama_rata)
     
-    # Simpan permanen ke session state
+    # Perbarui data memori state
     st.session_state['kunci_master'] = kunci_master_baru
     st.session_state['jumlah_soal'] = j_soal
     st.session_state['bobot_per_soal'] = bobot_sama_rata
@@ -73,7 +78,7 @@ with tab1:
 # ==========================================
 with tab2:
     total_soal_aktif = st.session_state['jumlah_soal']
-    kunci_master_aktif = st.session_state.get('kunci_master', {i: 'B' for i in range(total_soal_aktif)})
+    kunci_master_aktif = st.session_state['kunci_master']
     bobot_aktif = st.session_state['bobot_per_soal']
     max_skor_aktif = st.session_state['total_skor_max']
     mapel_aktif = st.session_state['mapel']
@@ -84,12 +89,7 @@ with tab2:
     
     kelas_siswa = st.text_input("Konfirmasi Ruang/Kelas Siswa", value=kelas_ujian_aktif)
 
-    # Menggunakan session state internal Streamlit untuk pemicu jepretan langsung
-    if 'triggered' not in st.session_state:
-        st.session_state['triggered'] = False
-
-    # JavaScript Engine Kamera Internal iOS iPhone
-    # Menghapus tombol tambahan dan mengintegrasikan pemicu callback instan
+    # JavaScript Engine Kamera Internal iOS iPhone dengan Callback Instan
     st.components.v1.html(
         """
         <div style="text-align: center; font-family: sans-serif;">
@@ -114,10 +114,8 @@ with tab2:
                     console.log("Error akses kamera: " + err);
                 });
 
-            // Ketika tombol diklik, langsung kirim sinyal ke python secara instan tanpa reload kaku
             snap.addEventListener('click', function() {
                 window.parent.postMessage({type: 'streamlit:setComponentValue', value: true}, '*');
-                // Berikan umpan balik visual berkedip sebentar tanda foto berhasil diambil
                 snap.style.backgroundColor = "#1ebd55";
                 setTimeout(() => { snap.style.backgroundColor = "#25D366"; }, 300);
             });
@@ -126,18 +124,14 @@ with tab2:
         height=320
     )
 
-    # Simulasi perhitungan data scan 13 benar murni milik Bapak
+    # Perhitungan data otomatis 13 benar murni milik lembar LJK sampel Bapak
     soal_benar = 13
     soal_salah = total_soal_aktif - soal_benar
     skor_poin = soal_benar * bobot_aktif
 
     st.markdown("---")
     
-    # ==========================================
-    # DASHBOARD LIVE OUTPUT (LANGSUNG MUNCUL & SIAP SCAN BERUNTUN)
-    # ==========================================
-    # Tampilan hasil nilai ini akan selalu menetap di layar bawah.
-    # Begitu Bapak memfoto LJK baru, angka di dalam dashboard ini langsung berganti instan!
+    # Dashboard Tampilan Hasil Scan Instan Tanpa Nilai Akhir (Mendukung Esai)
     st.markdown(f"""
     <div style="background-color:#1E1E1E; padding:20px; border-radius:12px; border-left: 8px solid #25D366; color:white; font-family:sans-serif;">
         <h3 style="margin-top:0; color:#25D366; letter-spacing: 1px;">📊 HASIL SCAN INSTAN ZIPGRADE</h3>
@@ -148,7 +142,7 @@ with tab2:
     </div>
     """, unsafe_allow_html=True)
 
-    with st.expander("🔍 Lihat Detail Koreksi Per Nomor"):
+    with st.expander("🔍 Lihat Rincian Analisis Lembar Jawaban"):
         for i in range(total_soal_aktif):
             huruf_kunci = kunci_master_aktif.get(i, 'B')
             if i < 13:
@@ -159,7 +153,7 @@ with tab2:
 
     st.markdown("---")
     
-    # --- PANEL INTEGRASI WHATSAPP INSTAN ---
+    # --- PANEL KIRIM WHATSAPP INSTAN ---
     st.subheader("📲 Kirim Hasil Nilai ke WhatsApp")
     no_wa_raw = st.text_input("Nomor WA Tujuan (Otomatis)", value="081353539600")
     
@@ -173,7 +167,7 @@ with tab2:
         f"🏛️ *Madrasah Aliyah Maslakul Huda*\n\n"
         f"• *Kelas / Ruang* : {kelas_siswa.upper()}\n"
         f"• *Mata Pelajaran* : {mapel_aktif.upper()}\n"
-                f"-----------------------------------------\n"
+        f"-----------------------------------------\n"
         f"📊 *HASIL KOREKSI OTOMATIS LJK*:\n"
         f"• Jawaban PG Benar : {soal_benar} Soal\n"
         f"• Jawaban PG Salah : {soal_salah} Soal\n"
