@@ -2,102 +2,134 @@ import streamlit as st
 import cv2
 import numpy as np
 
-st.set_page_config(page_title="Koreksi LJK Presisi", layout="centered")
+st.set_page_config(page_title="Sistem Koreksi LJK Maslakul Huda", layout="wide")
 
-st.title("📸 Pemindai LJK Presisi (Anti-Menceng)")
-st.write("Versi optimasi: Menggunakan pelurusan titik presisi tinggi dan grid mapping dinamis.")
+st.title("💯 Sistem Koreksi & Seleksi LJK Dinamis (1-50)")
+st.write("Aplikasi ini menggunakan sistem model berbasis LJK Kunci Jawaban untuk memetakan koordinat bulatan secara presisi.")
 
-uploaded_file = st.file_uploader("Unggah Foto LJK Anda...", type=["png", "jpg", "jpeg"])
-
-if uploaded_file is not None:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    h, w, _ = img.shape
+# --- INI LOGIKA UNTUK MELURUSKAN PERSPEKTIF LEMBAR JAWABAN ---
+def luruskan_lembar(image):
+    # Mengubah ukuran gambar ke standar pemrosesan agar ringan di HP
+    h_orig, w_orig = image.shape[:2]
+    scale = 800 / h_orig
+    resized = cv2.resize(image, (int(w_orig * scale), 800))
     
-    # 1. DETEKSI 4 TITIK POJOK UTAMA (Mencari Kontur Terluar / Kotak Pembatas)
-    gray_init = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred_init = cv2.GaussianBlur(gray_init, (5, 5), 0)
-    edged = cv2.Canny(blurred_init, 50, 150)
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     
-    contours, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    # Deteksi berbasis kotak hijau pembatas (Jangkar Sudut)
+    hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+    lower_green = np.array([35, 40, 40])
+    upper_green = np.array([85, 255, 255])
+    mask = cv2.inRange(hsv, lower_green, upper_green)
     
-    pts1 = None
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    centers = []
     for c in contours:
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        if len(approx) == 4:
-            pts1 = approx
-            break
-            
-    # Jika kontur luar gagal, gunakan fallback deteksi berbasis warna hijau kotak pembatas
-    if pts1 is None:
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        lower_green = np.array([35, 40, 40])
-        upper_green = np.array([85, 255, 255])
-        mask = cv2.inRange(hsv, lower_green, upper_green)
-        contours_g, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        centers = []
-        for cg in contours_g:
-            if 100 < cv2.contourArea(cg) < 2000:
-                M = cv2.moments(cg)
-                if M["m00"] != 0:
-                    centers.append([int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])])
-                    
-        if len(centers) >= 4:
-            # Ambil 4 sudut paling ekstrem
-            centers = np.array(centers)
-            s = centers.sum(axis=1)
-            diff = np.diff(centers, axis=1)
-            pts1 = np.float32([centers[np.argmin(s)], centers[np.argmin(diff)], centers[np.argmax(s)], centers[np.argmax(diff)]])
-
-    if pts1 is not None:
-        # Menata urutan titik (Kiri Atas, Kanan Atas, Kanan Bawah, Kiri Bawah)
-        pts1 = pts1.reshape(4, 2)
+        if 80 < cv2.contourArea(c) < 1500:
+            M = cv2.moments(c)
+            if M["m00"] != 0:
+                centers.append([int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])])
+                
+    if len(centers) >= 4:
+        centers = np.array(centers)
         rect = np.zeros((4, 2), dtype="float32")
-        s = pts1.sum(axis=1)
-        rect[0] = pts1[np.argmin(s)]
-        rect[2] = pts1[np.argmax(s)]
-        diff = np.diff(pts1, axis=1)
-        rect[1] = pts1[np.argmin(diff)]
-        rect[3] = pts1[np.argmax(diff)]
+        s = centers.sum(axis=1)
+        rect[0] = centers[np.argmin(s)] # Kiri Atas
+        rect[2] = centers[np.argmax(s)] # Kanan Bawah
+        diff = np.diff(centers, axis=1)
+        rect[1] = centers[np.argmin(diff)] # Kanan Atas
+        rect[3] = centers[np.argmax(diff)] # Kiri Bawah
         
-        # 2. PERSPECTIVE TRANSFORM DENGAN RESOLUSI LEBIH BESAR AGAR TIDAK PECAH
-        width, height = 600, 800
+        # Warp ke ukuran standar resolusi tinggi
+        width, height = 600, 850
         pts2 = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
         M_matrix = cv2.getPerspectiveTransform(rect, pts2)
-        warped = cv2.warpPerspective(img, M_matrix, (width, height))
-        final_output = warped.copy()
+        warped = cv2.warpPerspective(resized, M_matrix, (width, height))
+        return warped
+    return None
+
+# --- INI LOGIKA UNTUK MENGEKSTRAK KISI BULATAN ---
+def dapatkan_kisi_bulatan(warped_img):
+    gray = cv2.cvtColor(warped_img, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+    
+    cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    bulatan = []
+    for c in cnts:
+        (x, y, w, h) = cv2.boundingRect(c)
+        ar = w / float(h)
+        # Karakteristik bulatan LJK
+        if w >= 12 and h >= 12 and w <= 25 and h <= 25 and 0.75 <= ar <= 1.25:
+            bulatan.append((x, y, w, h))
+    return bulatan
+
+# --- INTERFACE UTAMA STREAMLIT ---
+col_mod, col_scan = st.columns(2)
+
+with col_mod:
+    st.header("1. Registrasi Model (Kunci)")
+    file_model = st.file_uploader("Unggah LJK Kunci Jawaban (Sebagai Acuan)", type=["png", "jpg", "jpeg"])
+    
+    if file_model:
+        bytes_data = np.asarray(bytearray(file_model.read()), dtype=np.uint8)
+        img_model = cv2.imdecode(bytes_data, cv2.IMREAD_COLOR)
         
-        # 3. DETEKSI BULATAN SECARA ADAPTIF (Mengikuti kontur bulat, bukan koordinat kaku)
-        gray_w = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-        thresh = cv2.threshold(gray_w, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
-        
-        # Cari semua objek bulat di kertas yang sudah lurus
-        cnts, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        bubble_contours = []
-        
-        for c in cnts:
-            (x, y, w_b, h_b) = cv2.boundingRect(c)
-            ar = w_b / float(h_b)
-            # Filter objek yang benar-benar bulat berbentuk lingkaran LJK
-            if w_b >= 10 and h_b >= 10 and 0.8 <= ar <= 1.2:
-                bubble_contours.append(c)
-                
-        st.success(f"Berhasil mendeteksi {len(bubble_contours)} bulatan LJK!")
-        
-        # Gambar semua bulatan yang berhasil dikunci langsung pada posisinya
-        for c in bubble_contours:
-            (x, y, w_b, h_b) = cv2.boundingRect(c)
-            # Menggambar kotak presisi langsung di sekeliling bulatan asli gambar
-            cv2.rectangle(final_output, (x, y), (x + w_b, y + h_b), (0, 255, 0), 2)
+        warped_model = luruskan_lembar(img_model)
+        if warped_model is not None:
+            list_bulatan = dapatkan_kisi_bulatan(warped_model)
+            # Simpan koordinat bulatan ke dalam session state agar diingat oleh sistem
+            st.session_state['model_coords'] = list_bulatan
+            st.session_state['warped_model'] = warped_model
+            st.success(f"Model Berhasil Dikunci! Menemukan {len(list_bulatan)} titik referensi pilihan ganda.")
             
-        # Tampilkan Hasil Perbaikan
-        img_original_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img_final_rgb = cv2.cvtColor(final_output, cv2.COLOR_BGR2RGB)
-        
-        st.image(img_original_rgb, caption="Foto Asli", use_container_width=True)
-        st.image(img_final_rgb, caption="Hasil Koreksi Presisi (Kotak Hijau Mengunci Bulatan Asli)", use_container_width=True)
+            # Tampilkan visualisasi model cetak biru
+            vis_model = warped_model.copy()
+            for (x, y, w, h) in list_bulatan:
+                cv2.rectangle(vis_model, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            st.image(cv2.cvtColor(vis_model, cv2.COLOR_BGR2RGB), caption="Cetak Biru Model Referensi")
+        else:
+            st.error("Gagal meluruskan LJK Model. Pastikan 4 kotak hijau terlihat jelas.")
+
+with col_scan:
+    st.header("2. Pemindaian LJK Jawaban")
+    if 'model_coords' not in st.session_state:
+        st.warning("Silakan unggah dan registrasi LJK Kunci di sebelah kiri terlebih dahulu.")
     else:
-        st.error("Gagal meluruskan gambar. Pastikan batas tepi kertas LJK atau 4 kotak hijau terlihat jelas tanpa terpotong jari/bayangan.")
+        file_scan = st.file_uploader("Unggah LJK Lembar Jawaban Siswa/Ujian", type=["png", "jpg", "jpeg"])
+        
+        if file_scan:
+            bytes_data_s = np.asarray(bytearray(file_scan.read()), dtype=np.uint8)
+            img_scan = cv2.imdecode(bytes_data_s, cv2.IMREAD_COLOR)
+            
+            warped_scan = luruskan_lembar(img_scan)
+            if warped_scan is not None:
+                final_output = warped_scan.copy()
+                
+                # Pemrosesan biner gambar siswa untuk mendeteksi pilihan yang dihitamkan
+                gray_s = cv2.cvtColor(warped_scan, cv2.COLOR_BGR2GRAY)
+                thresh_s = cv2.threshold(gray_s, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+                
+                # Ambil koordinat referensi dari model yang sudah dikunci tadi
+                referensi_bulatan = st.session_state['model_coords']
+                
+                # Proyeksikan koordinat model ke gambar yang baru masuk
+                for (x, y, w, h) in referensi_bulatan:
+                    # Ambil potongan area piksel bulatan
+                    mask_area = thresh_s[y:y+h, x:x+w]
+                    total_piksel = cv2.countNonZero(mask_area)
+                    luas_area = w * h
+                    kepadatan = total_piksel / float(luas_area)
+                    
+                    # Jika kerapatan piksel hitam tinggi, tandai sebagai pilihan siswa (Warna Merah Solid)
+                    if kepadatan > 0.5: 
+                        cv2.rectangle(final_output, (x, y), (x+w, y+h), (0, 0, 255), -1) 
+                    else:
+                        # Bulatan kosong biasa (Warna Hijau Presisi)
+                        cv2.rectangle(final_output, (x, y), (x+w, y+h), (0, 255, 0), 1)
+                
+                st.success("Sinkronisasi Selesai! Semua bulatan dipetakan 100% pas mengikuti model acuan.")
+                st.image(cv2.cvtColor(final_output, cv2.COLOR_BGR2RGB), caption="Hasil Penyeleksian LJK Siswa Berdasarkan Model")
+            else:
+                st.error("Gagal mendeteksi lembar jawaban siswa. Pastikan posisi pengambilan gambar mirip dengan model referensi.")
+
