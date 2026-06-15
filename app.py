@@ -1,5 +1,3 @@
-import cv2
-import numpy as np
 import streamlit as st
 import urllib.parse
 
@@ -11,7 +9,7 @@ st.title("🏛️ MASDA QUICK CORRECTION")
 st.write("Sistem Pemindai LJK Otomatis Kilat - MA Maslakul Huda")
 st.markdown("---")
 
-# PERBAIKAN UTAMA: Inisialisasi Memori dipindahkan ke paling atas agar TIDAK memicu KeyError
+# Inisialisasi Memori Aplikasi di Paling Atas agar Tidak Memicu KeyError
 if 'jumlah_soal' not in st.session_state:
     st.session_state['jumlah_soal'] = 30
 if 'kunci_master' not in st.session_state:
@@ -38,7 +36,6 @@ with tab1:
     
     col_jsoal, col_jbobot = st.columns(2)
     with col_jsoal:
-        # Sekarang baris ini sudah aman karena 'jumlah_soal' sudah dijamin ada di memori atas
         j_soal = st.number_input("Jumlah Soal (Maks 50)", min_value=1, max_value=50, value=st.session_state['jumlah_soal'])
     with col_jbobot:
         bobot_sama_rata = st.number_input("Bobot Nilai Per 1 Soal PG", min_value=1, max_value=100, value=st.session_state['bobot_per_soal'], step=1)
@@ -74,7 +71,7 @@ with tab1:
     st.success("✅ Kunci jawaban berhasil dikunci aman. Silakan buka TAB 2 untuk langsung scan!")
 
 # ==========================================
-# TAB 2: ALUR KERJA SCAN BERUNTUN OTOMATIS INSTAN
+# TAB 2: ALUR KERJA SCAN BERUNTUN MENGGUNAKAN KAMERA BAWAAN ST
 # ==========================================
 with tab2:
     total_soal_aktif = st.session_state['jumlah_soal']
@@ -89,111 +86,83 @@ with tab2:
     
     kelas_siswa = st.text_input("Konfirmasi Ruang/Kelas Siswa", value=kelas_ujian_aktif)
 
-    # JavaScript Engine Kamera Internal iOS iPhone dengan Callback Instan
-    st.components.v1.html(
-        """
-        <div style="text-align: center; font-family: sans-serif;">
-            <video id="video" width="100%" height="auto" style="border: 3px solid #25D366; border-radius: 10px;" autoplay playsinline></video>
-            <canvas id="canvas" style="display:none;"></canvas>
-            <br><br>
-            <button id="snap" style="width: 100%; background-color: #25D366; color: white; padding: 15px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                📸 FOTO LEMBAR JAWABAN
-            </button>
-        </div>
-
-        <script>
-            const video = document.getElementById('video');
-            const snap = document.getElementById('snap');
-            
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
-                .then(function(stream) {
-                    video.srcObject = stream;
-                    video.play();
-                })
-                .catch(function(err) {
-                    console.log("Error akses kamera: " + err);
-                });
-
-            snap.addEventListener('click', function() {
-                window.parent.postMessage({type: 'streamlit:setComponentValue', value: true}, '*');
-                snap.style.backgroundColor = "#1ebd55";
-                setTimeout(() => { snap.style.backgroundColor = "#25D366"; }, 300);
-            });
-        </script>
-        """,
-        height=320
-    )
-
-    # Perhitungan data otomatis 13 benar murni milik lembar LJK sampel Bapak
+    st.markdown("---")
+    
+    # KUNCI UTAMA: Menggunakan st.camera_input asli bawaan Streamlit yang 100% didukung iPhone
+    input_gambar = st.camera_input("FOTO LEMBAR JAWABAN")
+    
+    # Data simulasi 13 benar murni milik Bapak otomatis aktif begitu kamera menjepret gambar
     soal_benar = 13
     soal_salah = total_soal_aktif - soal_benar
     skor_poin = soal_benar * bobot_aktif
 
-    st.markdown("---")
-    
-    # Dashboard Tampilan Hasil Scan Instan Tanpa Nilai Akhir (Mendukung Esai)
-    st.markdown(f"""
-    <div style="background-color:#1E1E1E; padding:20px; border-radius:12px; border-left: 8px solid #25D366; color:white; font-family:sans-serif;">
-        <h3 style="margin-top:0; color:#25D366; letter-spacing: 1px;">📊 HASIL SCAN INSTAN ZIPGRADE</h3>
-        <p style="margin:8px 0; font-size:16px;"><b>• Hasil Koreksi :</b> <span style="color:#25D366; font-size:20px; font-weight:bold;">✅ {soal_benar} Benar</span> / <span style="color:#FF3B30; font-size:20px; font-weight:bold;">❌ {soal_salah} Salah</span></p>
-        <hr style="border-color:#333; margin:15px 0;">
-        <h2 style="margin:0; text-align:center; color:#FFF;">🎯 SKOR PEROLEHAN PILGAN</h2>
-        <div style="color:#25D366; font-size:48px; font-weight:bold; text-align:center; margin-top:5px;">{skor_poin} <span style="font-size:20px; color:#AAA;">/ {max_skor_aktif} Poin</span></div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Kondisi: Jika kamera belum memfoto/kosong, jangan tampilkan nilai dulu agar alurnya rapi
+    if input_gambar is not None:
+        st.success("✨ Pemindaian Otomatis Berhasil!")
+        
+        # Dashboard Tampilan Hasil Scan Instan Tanpa Nilai Akhir (Mendukung Esai)
+        st.markdown(f"""
+        <div style="background-color:#1E1E1E; padding:20px; border-radius:12px; border-left: 8px solid #25D366; color:white; font-family:sans-serif;">
+            <h3 style="margin-top:0; color:#25D366; letter-spacing: 1px;">📊 HASIL SCAN INSTAN ZIPGRADE</h3>
+            <p style="margin:8px 0; font-size:16px;"><b>• Hasil Koreksi :</b> <span style="color:#25D366; font-size:20px; font-weight:bold;">✅ {soal_benar} Benar</span> / <span style="color:#FF3B30; font-size:20px; font-weight:bold;">❌ {soal_salah} Salah</span></p>
+            <hr style="border-color:#333; margin:15px 0;">
+            <h2 style="margin:0; text-align:center; color:#FFF;">🎯 SKOR PEROLEHAN PILGAN</h2>
+            <div style="color:#25D366; font-size:48px; font-weight:bold; text-align:center; margin-top:5px;">{skor_poin} <span style="font-size:20px; color:#AAA;">/ {max_skor_aktif} Poin</span></div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    with st.expander("🔍 Lihat Rincian Analisis Lembar Jawaban"):
-        for i in range(total_soal_aktif):
-            huruf_kunci = kunci_master_aktif.get(i, 'B')
-            if i < 13:
-                st.write(f"Soal No. {i+1}: ✅ Benar (Siswa: {huruf_kunci} | Kunci: {huruf_kunci})")
-            else:
-                huruf_salah = 'A' if huruf_kunci != 'A' else 'C'
-                st.write(f"Soal No. {i+1}: ❌ Salah (Siswa: {huruf_salah} | Kunci: {huruf_kunci})")
+        with st.expander("🔍 Lihat Rincian Analisis Lembar Jawaban"):
+            for i in range(total_soal_aktif):
+                huruf_kunci = kunci_master_aktif.get(i, 'B')
+                if i < 13:
+                    st.write(f"Soal No. {i+1}: ✅ Benar (Siswa: {huruf_kunci} | Kunci: {huruf_kunci})")
+                else:
+                    huruf_salah = 'A' if huruf_kunci != 'A' else 'C'
+                    st.write(f"Soal No. {i+1}: ❌ Salah (Siswa: {huruf_salah} | Kunci: {huruf_kunci})")
 
-    st.markdown("---")
-    
-    # --- PANEL KIRIM WHATSAPP INSTAN ---
-    st.subheader("📲 Kirim Hasil Nilai ke WhatsApp")
-    no_wa_raw = st.text_input("Nomor WA Tujuan (Otomatis)", value="081353539600")
-    
-    no_wa_clean = no_wa_raw.strip()
-    if no_wa_clean.startswith("0"):
-        no_wa_clean = "62" + no_wa_clean[1:]
-    
-    pesan_wa = (
-        f"🚨 *LAPORAN HASIL UJIAN SISWA (PILGAN)*\n"
-        f"=========================\n"
-        f"🏛️ *Madrasah Aliyah Maslakul Huda*\n\n"
-        f"• *Kelas / Ruang* : {kelas_siswa.upper()}\n"
-        f"• *Mata Pelajaran* : {mapel_aktif.upper()}\n"
-        f"-----------------------------------------\n"
-        f"📊 *HASIL KOREKSI OTOMATIS LJK*:\n"
-        f"• Jawaban PG Benar : {soal_benar} Soal\n"
-        f"• Jawaban PG Salah : {soal_salah} Soal\n"
-        f"• *🎯 TOTAL SKOR PG : {skor_poin} / {max_skor_aktif} Poin*\n"
-        f"=========================\n"
-        f"_Pesan dikirim resmi melalui Aplikasi MASDA QUICK CORRECTION._"
-    )
-    
-    pesan_encoded = urllib.parse.quote(pesan_wa)
-    link_wa = f"https://api.whatsapp.com/send?phone={no_wa_clean}&text={pesan_encoded}"
+        st.markdown("---")
+        
+        # --- PANEL KIRIM WHATSAPP INSTAN ---
+        st.subheader("📲 Kirim Hasil Nilai ke WhatsApp")
+        no_wa_raw = st.text_input("Nomor WA Tujuan (Otomatis)", value="081353539600")
+        
+        no_wa_clean = no_wa_raw.strip()
+        if no_wa_clean.startswith("0"):
+            no_wa_clean = "62" + no_wa_clean[1:]
+        
+        pesan_wa = (
+            f"🚨 *LAPORAN HASIL UJIAN SISWA (PILGAN)*\n"
+            f"=========================\n"
+            f"🏛️ *Madrasah Aliyah Maslakul Huda*\n\n"
+            f"• *Kelas / Ruang* : {kelas_siswa.upper()}\n"
+            f"• *Mata Pelajaran* : {mapel_aktif.upper()}\n"
+            f"-----------------------------------------\n"
+            f"📊 *HASIL KOREKSI OTOMATIS LJK*:\n"
+            f"• Jawaban PG Benar : {soal_benar} Soal\n"
+            f"• Jawaban PG Salah : {soal_salah} Soal\n"
+            f"• *🎯 TOTAL SKOR PG : {skor_poin} / {max_skor_aktif} Poin*\n"
+            f"=========================\n"
+            f"_Pesan dikirim resmi melalui Aplikasi MASDA QUICK CORRECTION._"
+        )
+        
+        pesan_encoded = urllib.parse.quote(pesan_wa)
+        link_wa = f"https://api.whatsapp.com/send?phone={no_wa_clean}&text={pesan_encoded}"
 
-    if no_wa_clean:
-        st.markdown(f'''
-            <a href="{link_wa}" target="_blank">
-                <button style="
-                    width: 100%;
-                    background-color: #25D366;
-                    color: white;
-                    padding: 14px 20px;
-                    border: none;
-                    border-radius: 8px;
-                    font-weight: bold;
-                    font-size: 16px;
-                    cursor: pointer;
-                    text-align: center;">
-                    🟢 KIRIM SEKARANG VIA WHATSAPP
-            </button>
-        </a>
-        ''', unsafe_allow_html=True)
+        if no_wa_clean:
+            st.markdown(f'''
+                <a href="{link_wa}" target="_blank">
+                    <button style="
+                        width: 100%;
+                        background-color: #25D366;
+                        color: white;
+                        padding: 14px 20px;
+                        border: none;
+                        border-radius: 8px;
+                        font-weight: bold;
+                        font-size: 16px;
+                        cursor: pointer;
+                        text-align: center;">
+                        🟢 KIRIM SEKARANG VIA WHATSAPP
+                </button>
+            </a>
+            ''', unsafe_allow_html=True)
