@@ -4,13 +4,13 @@ import numpy as np
 
 st.set_page_config(page_title="Koreksi LJK Presisi Maslakul Huda", layout="wide")
 
-st.title("💯 Pemindai LJK Metode Grid Geometris (Anti-Meleset)")
-st.write("Sistem ini mengunci koordinat bulatan berdasarkan layout matematika LJK, bukan tebakan otomatis.")
+st.title("💯 Pemindai LJK dengan Fitur Pengepas Bulatan (Slider Kontrol)")
+st.write("Gunakan menu slider di sebelah kiri untuk menggeser posisi bulatan hijau agar pas di tengah lingkaran LJK.")
 
 def luruskan_lembar(image):
     """Meluruskan kertas menggunakan 4 titik jangkar kotak pembatas"""
     h_orig, w_orig = image.shape[:2]
-    scale = 1000 / h_orig  # Naikkan resolusi ke 1000px agar presisi
+    scale = 1000 / h_orig
     resized = cv2.resize(image, (int(w_orig * scale), 1000))
     
     hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
@@ -30,13 +30,12 @@ def luruskan_lembar(image):
         centers = np.array(centers)
         rect = np.zeros((4, 2), dtype="float32")
         s = centers.sum(axis=1)
-        rect[0] = centers[np.argmin(s)]  # Kiri Atas
-        rect[2] = centers[np.argmax(s)]  # Kanan Bawah
+        rect[0] = centers[np.argmin(s)]  
+        rect[2] = centers[np.argmax(s)]  
         diff = np.diff(centers, axis=1)
-        rect[1] = centers[np.argmin(diff)] # Kanan Atas
-        rect[3] = centers[np.argmax(diff)] # Kiri Bawah
+        rect[1] = centers[np.argmin(diff)] 
+        rect[3] = centers[np.argmax(diff)] 
         
-        # Dimensi standar lembar LJK yang telah diluruskan
         width, height = 600, 850
         pts2 = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
         M_matrix = cv2.getPerspectiveTransform(rect, pts2)
@@ -44,60 +43,70 @@ def luruskan_lembar(image):
         return warped
     return None
 
-def buat_grid_ljk():
-    """
-    Memetakan koordinat matematika murni berdasarkan layout kertas Maslakul Huda.
-    Mencakup Soal 1-50 dengan opsi A, B, C, D, E.
-    """
+# --- SIDEBAR KONTROL UNTUK PENGGESERAN DINAMIS ---
+st.sidebar.header("🛠️ Pengaturan Posisi Bulatan (Paskan Di Sini)")
+
+# Kontrol Ukuran Bulatan & Jarak Antar Opsi
+radius_bullet = st.sidebar.slider("Ukuran Jari-jari Lingkaran", 5, 15, 8)
+jarak_opsi = st.sidebar.slider("Jarak Horizontal Opsi (A ke E)", 15, 25, 18)
+jarak_baris = st.sidebar.slider("Jarak Vertikal Baris Soal", 15, 25, 21)
+
+st.sidebar.subheader("📍 Geser Posisi Blok Atas (Soal 11-40)")
+shift_x_atas = st.sidebar.slider("Geser Kiri/Kanan (Atas)", -50, 50, 0)
+shift_y_atas = st.sidebar.slider("Geser Atas/Bawah (Atas)", -50, 50, 0)
+
+st.sidebar.subheader("📍 Geser Posisi Blok Bawah (Soal 1-10, 21-30, 41-50)")
+shift_x_bawah = st.sidebar.slider("Geser Kiri/Kanan (Bawah)", -50, 50, 0)
+shift_y_bawah = st.sidebar.slider("Geser Atas/Bawah (Bawah)", -50, 50, 0)
+
+
+def buat_grid_ljk_dinamis(j_opsi, j_baris, sx_atas, sy_atas, sx_bawah, sy_bawah):
     map_soal = {}
     
-    # 1. KONFIGURASI JARAK ANTAR OPSI (A ke B, B ke C, dst = ~18 piksel)
-    jarak_opsi = 18
-    
-    # ==================== BLOK ATAS (Soal 11-40) ====================
-    # Kolom Tengah (Soal 11-20) -> Koordinat X awal opsi A dimulai dari X=240
-    start_x_tengah_atas = 240
-    start_y_tengah_atas = 115
+    # ==================== BLOK ATAS ====================
+    # Kolom Tengah (Soal 11-20)
+    start_x_tengah_atas = 240 + sx_atas
+    start_y_tengah_atas = 115 + sy_atas
     for i in range(10):
         q_num = 11 + i
-        y_pos = start_y_tengah_atas + (i * 21) # Jarak antar baris soal = 21px
-        map_soal[q_num] = [(start_x_tengah_atas + (j * jarak_opsi), y_pos) for j in range(5)]
+        y_pos = start_y_tengah_atas + (i * j_baris)
+        map_soal[q_num] = [(start_x_tengah_atas + (j * j_opsi), y_pos) for j in range(5)]
         
-    # Kolom Kanan (Soal 31-40) -> Koordinat X awal opsi A dimulai dari X=395
-    start_x_kanan_atas = 395
-    start_y_kanan_atas = 115
+    # Kolom Kanan (Soal 31-40)
+    start_x_kanan_atas = 395 + sx_atas
+    start_y_kanan_atas = 115 + sy_atas
     for i in range(10):
         q_num = 31 + i
-        y_pos = start_y_kanan_atas + (i * 21)
-        map_soal[q_num] = [(start_x_kanan_atas + (j * jarak_opsi), y_pos) for j in range(5)]
+        y_pos = start_y_kanan_atas + (i * j_baris)
+        map_soal[q_num] = [(start_x_kanan_atas + (j * j_opsi), y_pos) for j in range(5)]
 
-    # ==================== BLOK BAWAH (Soal 1-10, 21-30, 41-50) ====================
-    # Kolom Kiri (Soal 1-10) -> Koordinat X awal opsi A dimulai dari X=112
-    start_x_kiri_bawah = 112
-    start_y_bawah = 433
+    # ==================== BLOK BAWAH ====================
+    # Kolom Kiri (Soal 1-10)
+    start_x_kiri_bawah = 112 + sx_bawah
+    start_y_bawah = 433 + sy_bawah
     for i in range(10):
         q_num = 1 + i
-        y_pos = start_y_bawah + (i * 21)
-        map_soal[q_num] = [(start_x_kiri_bawah + (j * jarak_opsi), y_pos) for j in range(5)]
+        y_pos = start_y_bawah + (i * j_baris)
+        map_soal[q_num] = [(start_x_kiri_bawah + (j * j_opsi), y_pos) for j in range(5)]
         
-    # Kolom Tengah (Soal 21-30) -> Koordinat X awal opsi A dimulai dari X=242
-    start_x_tengah_bawah = 242
+    # Kolom Tengah (Soal 21-30)
+    start_x_tengah_bawah = 242 + sx_bawah
     for i in range(10):
         q_num = 21 + i
-        y_pos = start_y_bawah + (i * 21)
-        map_soal[q_num] = [(start_x_tengah_bawah + (j * jarak_opsi), y_pos) for j in range(5)]
+        y_pos = start_y_bawah + (i * j_baris)
+        map_soal[q_num] = [(start_x_tengah_bawah + (j * j_opsi), y_pos) for j in range(5)]
         
-    # Kolom Kanan (Soal 41-50) -> Koordinat X awal opsi A dimulai dari X=397
-    start_x_kanan_bawah = 397
+    # Kolom Kanan (Soal 41-50)
+    start_x_kanan_bawah = 397 + sx_bawah
     for i in range(10):
         q_num = 41 + i
-        y_pos = start_y_bawah + (i * 21)
-        map_soal[q_num] = [(start_x_kanan_bawah + (j * jarak_opsi), y_pos) for j in range(5)]
+        y_pos = start_y_bawah + (i * j_baris)
+        map_soal[q_num] = [(start_x_kanan_bawah + (j * j_opsi), y_pos) for j in range(5)]
         
     return map_soal
 
-# --- ANTARMUKA STREAMLIT ---
-file_image = st.file_uploader("Unggah Gambar LJK (Kunci atau Jawaban Siswa)...", type=["png", "jpg", "jpeg"])
+# --- MAIN UPLOADER ---
+file_image = st.file_uploader("Unggah Gambar LJK...", type=["png", "jpg", "jpeg"])
 
 if file_image:
     bytes_data = np.asarray(bytearray(file_image.read()), dtype=np.uint8)
@@ -107,29 +116,18 @@ if file_image:
     if warped is not None:
         output_display = warped.copy()
         
-        # Buat pemetaan grid koordinat matematis LJK
-        grid_ljk = buat_grid_ljk()
-        radius_bullet = 8  # Ukuran radius lingkaran seleksi
+        # Panggil pemetaan grid berdasarkan nilai slider
+        grid_ljk = buat_grid_ljk_dinamis(jarak_opsi, jarak_baris, shift_x_atas, shift_y_atas, shift_x_bawah, shift_y_bawah)
         
-        # Gambar lingkaran penyeleksi murni berdasarkan koordinat rumus matematika layout
         for q_num, opsi_list in grid_ljk.items():
-            # Beri label nomor soal di sebelah kiri opsi A
             x_label, y_label = opsi_list[0]
             cv2.putText(output_display, f"{q_num}", (x_label - 22, y_label + 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1)
             
-            # Gambar bulatan pilihan ganda A, B, C, D, E
             for (cx, cy) in opsi_list:
                 cv2.circle(output_display, (cx, cy), radius_bullet, (0, 255, 0), 1)
-                cv2.circle(output_display, (cx, cy), 1, (0, 0, 255), -1) # Titik pusat tengah
+                cv2.circle(output_display, (cx, cy), 1, (0, 0, 255), -1)
                 
-        st.success("Berhasil Mengunci Grid Seluruh Bulatan Nomor 1-50!")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.image(cv2.cvtColor(warped, cv2.COLOR_BGR2RGB), caption="LJK Setelah Diluruskan")
-        with col2:
-            st.image(cv2.cvtColor(output_display, cv2.COLOR_BGR2RGB), caption="Hasil Pemetaan Grid Matematika (Pasti Pas)")
-            
+        st.image(cv2.cvtColor(output_display, cv2.COLOR_BGR2RGB), caption="Hasil Kalibrasi Penyeleksian LJK (Gunakan slider untuk paskan lingkaran)")
     else:
         st.error("Gagal mendeteksi kertas. Pastikan 4 kotak hijau di sudut LJK tidak terpotong kamera.")
